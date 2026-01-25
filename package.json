@@ -1,14 +1,15 @@
 {
-  "name": "manga-translator-extension",
-  "displayName": "Manga Translator",
+  "name": "panora-extension",
+  "displayName": "Panora",
   "version": "0.0.1",
-  "description": "A manga translator extension which translates manga using OCR and translation APIs",
+  "description": "Read any manga, in any language, instantly.",
   "author": "Rithvik",
   "license": "MIT",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "fix-icons": "node scripts/fix-icons.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
