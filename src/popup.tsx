@@ -70,12 +70,12 @@ function IndexPopup() {
         },
         (response) => {
           if (chrome.runtime.lastError) {
-            setError(chrome.runtime.lastError.message);
+            setError(chrome.runtime.lastError.message || "Unexpected error");
             setStatus("error");
           }
         },
       );
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || "Failed to start translation");
       setStatus("error");
     }

@@ -64,7 +64,7 @@ const MangaTranslator = () => {
         total: images.length,
         status: "processing",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Auto translation error:", error);
       chrome.runtime.sendMessage({
         action: "ERROR",
