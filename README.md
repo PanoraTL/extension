@@ -24,20 +24,24 @@ A browser extension built with Plasmo Framework that translates manga text using
 ```
 .
 ├── src/                      # Source code directory
-│   ├── components/           # React components
+│   ├── api/                 # API services
+│   │   └── services/
+│   │       ├── gemini.ts    # Gemini API integration
+│   │       ├── openai.ts    # OpenAI API integration
+│   │       └── index.ts     # Service exports
+│   ├── components/          # React components
 │   │   └── ui/              # shadcn-ui components
 │   ├── contents/            # Content scripts
-│   │   └── manga-translator.tsx
+│   │   ├── components/      # Content script UI components
+│   │   ├── services/        # Content script services
+│   │   └── translator.tsx   # Main content script
 │   ├── lib/                 # Utility functions
 │   │   └── utils.ts
+│   ├── types/               # TypeScript type definitions
+│   │   └── translator.types.ts
 │   ├── popup.tsx            # Extension popup
 │   ├── background.ts        # Background service worker
 │   └── style.css            # Global styles
-├── api/                     # API services
-│   └── services/
-│       ├── gemini.ts        # Gemini API integration
-│       ├── openai.ts        # OpenAI API integration
-│       └── index.ts         # Service exports
 ├── assets/                  # Static assets
 ├── package.json
 ├── tsconfig.json
@@ -81,6 +85,8 @@ A browser extension built with Plasmo Framework that translates manga text using
    ```
    PLASMO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
    PLASMO_PUBLIC_OPENAI_API_KEY=your_openai_api_key_here
+   PLASMO_PUBLIC_DEFAULT_PROVIDER=gemini
+   PLASMO_PUBLIC_DEFAULT_TARGET_LANG=en
    ```
 
    Get your API keys:
@@ -151,10 +157,10 @@ import Button from "~/components/ui/button"
 
 ### API Services
 
-The API services are in the `api/` directory and can be imported:
+The API services are in the `src/api/` directory and can be imported:
 
 ```typescript
-import { geminiService, openaiService } from "../api/services"
+import { geminiService, openaiService } from "~/api/services"
 
 // Initialize with API key
 geminiService.initialize(apiKey)

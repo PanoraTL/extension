@@ -12,7 +12,7 @@ export class OpenAIService {
   initialize(apiKey: string) {
     this.client = new OpenAI({
       apiKey,
-      dangerouslyAllowBrowser: true // Note: For production, use a backend proxy
+      dangerouslyAllowBrowser: true
     })
   }
 
@@ -83,7 +83,6 @@ export class OpenAIService {
 
       const responseText = completion.choices[0]?.message?.content || ""
 
-      // Try to parse JSON response
       try {
         const jsonMatch = responseText.match(/\{[\s\S]*\}/)
         if (jsonMatch) {

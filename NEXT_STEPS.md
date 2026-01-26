@@ -30,6 +30,8 @@ npm install
    ```
    PLASMO_PUBLIC_GEMINI_API_KEY=your_actual_key_here
    PLASMO_PUBLIC_OPENAI_API_KEY=your_actual_key_here
+   PLASMO_PUBLIC_DEFAULT_PROVIDER=gemini
+   PLASMO_PUBLIC_DEFAULT_TARGET_LANG=en
    ```
 
 3. Get API keys:
@@ -65,19 +67,22 @@ This will:
 ```
 extension/
 ├── src/                    # All source code (--with-src enabled)
+│   ├── api/               # API service layer
+│   │   └── services/
+│   │       ├── gemini.ts  # Gemini 2.5 Flash integration
+│   │       ├── openai.ts  # GPT-4o Mini integration
+│   │       └── index.ts
 │   ├── popup.tsx          # Extension popup UI
 │   ├── background.ts      # Background service worker
 │   ├── contents/          # Content scripts
-│   │   └── manga-translator.tsx
+│   │   ├── components/    # Content script UI components
+│   │   ├── services/      # Content script services
+│   │   └── translator.tsx # Main content script
 │   ├── components/ui/     # shadcn-ui components (add as needed)
 │   ├── lib/utils.ts       # Utility functions
+│   ├── types/             # TypeScript type definitions
+│   │   └── translator.types.ts
 │   └── style.css          # Global Tailwind styles
-│
-├── api/                   # API service layer
-│   └── services/
-│       ├── gemini.ts      # Gemini 2.5 Flash integration
-│       ├── openai.ts      # GPT-4o Mini integration
-│       └── index.ts
 │
 ├── assets/                # Static assets (icons, images)
 ├── package.json           # Dependencies & scripts
@@ -117,7 +122,7 @@ import Button from "~/components/ui/button"
 ### 2. Using API Services
 
 ```typescript
-import { geminiService, openaiService } from "../api/services"
+import { geminiService, openaiService } from "~/api/services"
 
 // In your component or background script:
 geminiService.initialize(process.env.PLASMO_PUBLIC_GEMINI_API_KEY)
