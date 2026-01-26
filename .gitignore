@@ -32,3 +32,13 @@ Thumbs.db
 # Misc
 *.log
 .cache/
+
+# Agent / AI skill related files (generated or local agent configs)
+# These directories contain agent skills, credentials, or local test data — do not commit.
+.agent/
+.agents/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.windsurf/
