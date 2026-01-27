@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import "~/style.css";
 import type {
-  TranslationMode,
   TranslationSettings,
   TranslationStatus,
 } from "~/types/translator.types";
@@ -68,7 +67,7 @@ function IndexPopup() {
           mode,
           settings,
         },
-        (response) => {
+        () => {
           if (chrome.runtime.lastError) {
             setError(chrome.runtime.lastError.message || "Unexpected error");
             setStatus("error");
@@ -94,7 +93,7 @@ function IndexPopup() {
         {
           action: "STOP_TRANSLATION",
         },
-        (response) => {
+        () => {
           if (chrome.runtime.lastError) {
             console.error("Stop translation error:", chrome.runtime.lastError);
           }

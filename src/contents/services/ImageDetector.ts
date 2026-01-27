@@ -21,6 +21,10 @@ export class ImageDetector {
     const imageElements = this.findImages(bounds);
     const detectedImages: DetectedImage[] = [];
 
+    console.log(
+      `[IMAGE_DETECTOR] Found ${imageElements.length} visible images`,
+    );
+
     for (const img of imageElements) {
       try {
         const dataUrl = await this.toDataUrl(img);
@@ -34,18 +38,34 @@ export class ImageDetector {
         };
         detectedImages.push(detected);
       } catch (error) {
-        console.warn("Failed to convert image to data URL:", img.src, error);
+        console.warn(
+          "[IMAGE_DETECTOR] Failed to convert image to data URL:",
+          img.src,
+          error,
+        );
       }
     }
 
+    console.log(
+      `[IMAGE_DETECTOR] Successfully converted ${detectedImages.length} images`,
+    );
     return detectedImages;
   }
 
   static async toDataUrl(img: HTMLImageElement): Promise<string> {
+    console.log(
+      "[IMAGE_DETECTOR] Converting image:",
+      img.src.substring(0, 100),
+    );
     try {
-      return await this.convertWithCanvas(img);
+      const dataUrl = await this.convertWithCanvas(img);
+      console.log("[IMAGE_DETECTOR] Canvas conversion successful");
+      return dataUrl;
     } catch (error) {
-      console.warn("Canvas conversion failed, trying background fetch:", error);
+      console.warn(
+        "[IMAGE_DETECTOR] Canvas conversion failed, trying background fetch:",
+        error,
+      );
       return await this.fetchThroughBackground(img.src);
     }
   }
@@ -98,25 +118,58 @@ export class ImageDetector {
   }
 
   private static async fetchThroughBackground(url: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          action: "FETCH_IMAGE",
-          url,
-        },
-        (response) => {
-          if (response?.dataUrl) {
-            resolve(response.dataUrl);
-          } else {
-            reject(
-              new Error(
-                response?.error || "Failed to fetch image from background",
-              ),
-            );
-          }
-        },
+    console.log("[IMAGE_DETECTOR] Fetching through background:", url);
+
+    if (!chrome.runtime?.id) {
+      const error = new Error(
+        "Extension context invalidated - please refresh the page",
       );
+      console.error("[IMAGE_DETECTOR]", error.message);
+      throw error;
+    }
+
+    const timeout = 10000;
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Image fetch timeout after 10s")),
+        timeout,
+      ),
+    );
+
+    const fetchPromise = new Promise<string>((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(
+          { action: "FETCH_IMAGE", url },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "[IMAGE_DETECTOR] Background fetch error:",
+                chrome.runtime.lastError,
+              );
+              reject(chrome.runtime.lastError);
+            } else if (response?.dataUrl) {
+              console.log("[IMAGE_DETECTOR] Background fetch successful");
+              resolve(response.dataUrl);
+            } else {
+              console.error(
+                "[IMAGE_DETECTOR] No dataUrl in response:",
+                response,
+              );
+              reject(
+                new Error(
+                  response?.error || "Failed to fetch image from background",
+                ),
+              );
+            }
+          },
+        );
+      } catch (error) {
+        console.error("[IMAGE_DETECTOR] Send message exception:", error);
+        reject(error);
+      }
     });
+
+    return Promise.race([fetchPromise, timeoutPromise]);
   }
 
   static isVisible(img: HTMLImageElement): boolean {

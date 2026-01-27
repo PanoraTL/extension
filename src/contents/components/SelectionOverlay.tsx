@@ -186,7 +186,7 @@ export const SelectionOverlay = ({
     setCurrentPos(null);
   };
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) {
       onCancel();
     }

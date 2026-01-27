@@ -14,8 +14,12 @@ export class GeminiService {
   initialize(apiKey: string) {
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-latest",
+      model: "gemini-2.5-flash",
     });
+  }
+
+  isInitialized(): boolean {
+    return this.model !== null;
   }
 
   async translateText(
@@ -83,7 +87,37 @@ export class GeminiService {
     }
   }
 
-  
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = 3,
+    initialDelay: number = 1000,
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+
+        if (
+          error.message?.includes("503") ||
+          error.message?.includes("overloaded")
+        ) {
+          const delay = initialDelay * Math.pow(2, i);
+          console.log(
+            `[API] Retry ${i + 1}/${maxRetries} after ${delay}ms due to: ${error.message}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
   async detectTextRegionsWithOCR(
     imageData: string,
     targetLang: string = "en",
@@ -92,24 +126,28 @@ export class GeminiService {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
 
-    try {
-      const prompt = `You are analyzing a manga/comic image. Extract ALL text regions with their exact positions and background information.
+    return this.retryWithBackoff(async () => {
+      console.log("[API] Gemini detectTextRegionsWithOCR called");
+
+      const prompt = `You are analyzing a manga/comic image. Extract ALL text regions with their exact positions, translate them to ${targetLang}, and provide background information.
 
 For EACH text region found, provide:
 1. The original text (exact transcription, preserve line breaks)
-2. Bounding box coordinates as percentages of image dimensions (0-100):
+2. Translation to ${targetLang}
+3. Bounding box coordinates as percentages of image dimensions (0-100):
    - x: horizontal position from left edge (%)
    - y: vertical position from top edge (%)
    - width: width of text region (%)
    - height: height of text region (%)
-3. Background color (hex code, e.g., #FFFFFF) - sample the dominant color behind the text
-4. Background type: "solid" or "pattern"
-5. Confidence score (0.0 to 1.0)
+4. Background color (hex code, e.g., #FFFFFF) - sample the dominant color behind the text
+5. Background type: "solid" or "pattern"
+6. Confidence score (0.0 to 1.0)
 
 Return ONLY a valid JSON array with this exact structure:
 [
   {
     "originalText": "こんにちは",
+    "translatedText": "Hello",
     "bounds": { "x": 10.5, "y": 20.3, "width": 30.2, "height": 10.5 },
     "background": {
       "type": "solid",
@@ -139,18 +177,22 @@ IMPORTANT RULES:
       const response = await result.response;
       const text = response.text();
 
+      console.log("[API] Gemini response received, parsing...");
+
       try {
         const cleanedText = text
           .replace(/```json\n?/g, "")
-          .replace(/```\n?/g, "");
+          .replace(/```\n?/g, "")
+          .trim();
 
         const jsonMatch = cleanedText.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
+          console.log(`[API] Parsed ${parsed.length} text regions`);
 
           return parsed.map((region: any) => ({
             originalText: region.originalText || "",
-            translatedText: region.originalText || "",
+            translatedText: region.translatedText || region.originalText || "",
             bounds: {
               x: region.bounds?.x || 0,
               y: region.bounds?.y || 0,
@@ -164,21 +206,20 @@ IMPORTANT RULES:
             },
             confidence: region.confidence || 0.5,
           }));
+        } else {
+          console.warn("[API] No JSON array found in response");
         }
-      } catch (e) {
-        console.error("Failed to parse Gemini OCR response:", e);
-        console.error("Response text:", text);
-        throw new Error("Invalid JSON response from Gemini OCR");
+      } catch (e: any) {
+        console.error("[API] Failed to parse Gemini OCR response:", e);
+        console.error("[API] Response text:", text.substring(0, 500));
+        throw new Error(`Invalid JSON response from Gemini OCR: ${e.message}`);
       }
 
+      console.warn("[API] Returning empty array - no text detected");
       return [];
-    } catch (error) {
-      console.error("Gemini OCR detection error:", error);
-      throw error;
-    }
+    });
   }
 
-  
   async batchTranslate(
     texts: string[],
     targetLang: string = "en",
