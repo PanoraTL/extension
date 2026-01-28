@@ -6,7 +6,6 @@ import type {
 } from "~/types/translator.types";
 
 function IndexPopup() {
-  const [mode, setMode] = useState<"manual" | "auto">("auto");
   const [status, setStatus] = useState<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +63,7 @@ function IndexPopup() {
         tab.id,
         {
           action: "START_TRANSLATION",
-          mode,
+          mode: "auto",
           settings,
         },
         () => {
@@ -107,7 +106,7 @@ function IndexPopup() {
     }
   };
 
-  const isTranslating = status === "processing" || status === "selecting";
+  const isTranslating = status === "processing";
   const progressPercent =
     progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
 
@@ -123,35 +122,9 @@ function IndexPopup() {
 
         {}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-semibold text-foreground">
-            Translation Mode
-          </label>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setMode("auto")}
-              className={`flex-1 px-4 py-2 rounded-md font-medium transition-colors ${
-                mode === "auto"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              }`}
-            >
-              Auto Mode
-            </button>
-            <button
-              onClick={() => setMode("manual")}
-              className={`flex-1 px-4 py-2 rounded-md font-medium transition-colors ${
-                mode === "manual"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              }`}
-            >
-              Manual Mode
-            </button>
-          </div>
           <p className="text-xs text-muted-foreground">
-            {mode === "auto"
-              ? "Automatically translates all images on the page"
-              : "Select an area to translate specific panels"}
+            Automatically detects manga panels and translates speech bubbles one
+            at a time
           </p>
         </div>
 
@@ -162,9 +135,7 @@ function IndexPopup() {
               onClick={handleStartTranslation}
               className="px-4 py-3 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors font-medium"
             >
-              {mode === "auto"
-                ? "Translate All Images"
-                : "Select Area to Translate"}
+              Translate Manga
             </button>
           ) : (
             <button
@@ -197,9 +168,8 @@ function IndexPopup() {
         {}
         {status !== "idle" && (
           <div className="text-sm text-center text-muted-foreground">
-            {status === "selecting" && "Select an area on the page..."}
-            {status === "processing" && "Translating images..."}
-            {status === "complete" && "✓ Translation complete!"}
+            {status === "processing" && "Translating manga panels..."}
+            {status === "complete" && "Translation complete!"}
             {status === "error" && error && (
               <span className="text-destructive">{error}</span>
             )}

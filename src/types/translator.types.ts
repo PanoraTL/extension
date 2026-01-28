@@ -22,6 +22,8 @@ export interface TextRegion {
   bounds: BoundingBox;
   background: BackgroundInfo;
   confidence: number;
+  detectedFontSize?: number;
+  detectedFontStyle?: "bold" | "normal" | "condensed";
 }
 
 export interface BoundingBox {

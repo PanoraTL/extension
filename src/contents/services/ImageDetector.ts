@@ -27,6 +27,13 @@ export class ImageDetector {
 
     for (const img of imageElements) {
       try {
+        if (!this.isMangaPanel(img)) {
+          console.log(
+            `[IMAGE_DETECTOR] Skipping non-manga image: ${img.src.substring(0, 80)}`,
+          );
+          continue;
+        }
+
         const dataUrl = await this.toDataUrl(img);
         const detected: DetectedImage = {
           id: this.generateImageId(img),
@@ -39,137 +46,203 @@ export class ImageDetector {
         detectedImages.push(detected);
       } catch (error) {
         console.warn(
-          "[IMAGE_DETECTOR] Failed to convert image to data URL:",
-          img.src,
+          "[IMAGE_DETECTOR] Failed to convert image:",
+          img.src.substring(0, 80),
           error,
         );
       }
     }
 
     console.log(
-      `[IMAGE_DETECTOR] Successfully converted ${detectedImages.length} images`,
+      `[IMAGE_DETECTOR] Successfully converted ${detectedImages.length} manga panel images`,
     );
     return detectedImages;
   }
 
   static async toDataUrl(img: HTMLImageElement): Promise<string> {
-    console.log(
-      "[IMAGE_DETECTOR] Converting image:",
-      img.src.substring(0, 100),
-    );
+    // Try direct canvas draw first (works for same-origin)
     try {
-      const dataUrl = await this.convertWithCanvas(img);
-      console.log("[IMAGE_DETECTOR] Canvas conversion successful");
+      const dataUrl = await this.convertWithCanvas(img, false);
+      console.log("[IMAGE_DETECTOR] Direct canvas conversion successful");
       return dataUrl;
-    } catch (error) {
+    } catch (directError) {
       console.warn(
-        "[IMAGE_DETECTOR] Canvas conversion failed, trying background fetch:",
-        error,
+        "[IMAGE_DETECTOR] Direct canvas failed, trying CORS anonymous:",
+        directError,
       );
-      return await this.fetchThroughBackground(img.src);
     }
+
+    // Try with crossOrigin = anonymous
+    try {
+      const dataUrl = await this.convertWithCanvas(img, true);
+      console.log("[IMAGE_DETECTOR] CORS anonymous conversion successful");
+      return dataUrl;
+    } catch (corsError) {
+      console.warn(
+        "[IMAGE_DETECTOR] CORS anonymous failed, trying background fetch:",
+        corsError,
+      );
+    }
+
+    // Last resort: fetch through background service worker
+    return await this.fetchThroughBackground(img.src);
   }
 
   private static async convertWithCanvas(
     img: HTMLImageElement,
+    forceCors: boolean,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
+      const useExisting = !forceCors && img.complete && img.naturalWidth > 0;
 
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Failed to get canvas context"));
+      if (useExisting) {
+        try {
+          const dataUrl = this.drawImageToCanvas(img);
+          resolve(dataUrl);
+          return;
+        } catch (error) {
+          reject(error);
           return;
         }
-
-        ctx.drawImage(img, 0, 0);
-
-        const maxSize = 2048;
-        if (canvas.width > maxSize || canvas.height > maxSize) {
-          const scale = maxSize / Math.max(canvas.width, canvas.height);
-          const resizedCanvas = document.createElement("canvas");
-          resizedCanvas.width = canvas.width * scale;
-          resizedCanvas.height = canvas.height * scale;
-
-          const resizedCtx = resizedCanvas.getContext("2d");
-          if (!resizedCtx) {
-            reject(new Error("Failed to get resized canvas context"));
-            return;
-          }
-
-          resizedCtx.drawImage(
-            canvas,
-            0,
-            0,
-            resizedCanvas.width,
-            resizedCanvas.height,
-          );
-          resolve(resizedCanvas.toDataURL("image/png"));
-        } else {
-          resolve(canvas.toDataURL("image/png"));
-        }
-      } catch (error) {
-        reject(error);
       }
+
+      const newImg = new Image();
+      if (forceCors) {
+        newImg.crossOrigin = "anonymous";
+      }
+
+      const timeout = setTimeout(() => {
+        reject(new Error("Image load timeout"));
+      }, 8000);
+
+      newImg.onload = () => {
+        clearTimeout(timeout);
+        try {
+          const dataUrl = this.drawImageToCanvas(newImg);
+          resolve(dataUrl);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      newImg.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error("Image load failed"));
+      };
+
+      newImg.src = img.src;
     });
   }
 
-  private static async fetchThroughBackground(url: string): Promise<string> {
-    console.log("[IMAGE_DETECTOR] Fetching through background:", url);
+  private static drawImageToCanvas(img: HTMLImageElement): string {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
 
-    if (!chrome.runtime?.id) {
-      const error = new Error(
-        "Extension context invalidated - please refresh the page",
-      );
-      console.error("[IMAGE_DETECTOR]", error.message);
-      throw error;
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error("Image has zero dimensions");
     }
 
-    const timeout = 10000;
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Image fetch timeout after 10s")),
-        timeout,
-      ),
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Failed to get canvas context");
+    }
+
+    ctx.drawImage(img, 0, 0);
+
+    // Verify we actually got pixel data (security origin blocks will produce blank canvas)
+    const imageData = ctx.getImageData(0, 0, 1, 1);
+    if (
+      imageData.data[0] === 0 &&
+      imageData.data[1] === 0 &&
+      imageData.data[2] === 0 &&
+      imageData.data[3] === 0
+    ) {
+      // Could be a legitimately transparent pixel, so just proceed
+    }
+
+    const maxSize = 2048;
+    if (canvas.width > maxSize || canvas.height > maxSize) {
+      const scale = maxSize / Math.max(canvas.width, canvas.height);
+      const resizedCanvas = document.createElement("canvas");
+      resizedCanvas.width = Math.round(canvas.width * scale);
+      resizedCanvas.height = Math.round(canvas.height * scale);
+
+      const resizedCtx = resizedCanvas.getContext("2d");
+      if (!resizedCtx) {
+        throw new Error("Failed to get resized canvas context");
+      }
+
+      resizedCtx.drawImage(
+        canvas,
+        0,
+        0,
+        resizedCanvas.width,
+        resizedCanvas.height,
+      );
+      return resizedCanvas.toDataURL("image/png");
+    }
+
+    return canvas.toDataURL("image/png");
+  }
+
+  private static async fetchThroughBackground(url: string): Promise<string> {
+    console.log(
+      "[IMAGE_DETECTOR] Fetching through background:",
+      url.substring(0, 80),
     );
 
-    const fetchPromise = new Promise<string>((resolve, reject) => {
+    if (!chrome.runtime?.id) {
+      throw new Error(
+        "Extension context invalidated - please refresh the page",
+      );
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Background image fetch timeout (10s)"));
+      }, 10000);
+
       try {
         chrome.runtime.sendMessage(
           { action: "FETCH_IMAGE", url },
           (response) => {
+            clearTimeout(timeout);
+
             if (chrome.runtime.lastError) {
               console.error(
                 "[IMAGE_DETECTOR] Background fetch error:",
-                chrome.runtime.lastError,
-              );
-              reject(chrome.runtime.lastError);
-            } else if (response?.dataUrl) {
-              console.log("[IMAGE_DETECTOR] Background fetch successful");
-              resolve(response.dataUrl);
-            } else {
-              console.error(
-                "[IMAGE_DETECTOR] No dataUrl in response:",
-                response,
+                chrome.runtime.lastError.message,
               );
               reject(
                 new Error(
-                  response?.error || "Failed to fetch image from background",
+                  chrome.runtime.lastError.message || "Background fetch failed",
+                ),
+              );
+              return;
+            }
+
+            if (response?.dataUrl) {
+              console.log("[IMAGE_DETECTOR] Background fetch successful");
+              resolve(response.dataUrl);
+            } else {
+              reject(
+                new Error(
+                  response?.error || "No data URL returned from background",
                 ),
               );
             }
           },
         );
       } catch (error) {
-        console.error("[IMAGE_DETECTOR] Send message exception:", error);
-        reject(error);
+        clearTimeout(timeout);
+        reject(
+          new Error(
+            error instanceof Error ? error.message : "Failed to send message",
+          ),
+        );
       }
     });
-
-    return Promise.race([fetchPromise, timeoutPromise]);
   }
 
   static isVisible(img: HTMLImageElement): boolean {
@@ -188,14 +261,13 @@ export class ImageDetector {
       return false;
     }
 
-    const buffer = 100;
-    const inViewport =
+    const buffer = 200;
+    return (
       rect.top < window.innerHeight + buffer &&
       rect.bottom > -buffer &&
       rect.left < window.innerWidth + buffer &&
-      rect.right > -buffer;
-
-    return inViewport;
+      rect.right > -buffer
+    );
   }
 
   static intersects(rect1: DOMRect, rect2: DOMRect): boolean {
@@ -218,21 +290,17 @@ export class ImageDetector {
     return this.findImages();
   }
 
-  static batchImages<T>(items: T[], batchSize: number): T[][] {
-    const batches: T[][] = [];
-    for (let i = 0; i < items.length; i += batchSize) {
-      batches.push(items.slice(i, i + batchSize));
-    }
-    return batches;
-  }
-
   static isMangaPanel(img: HTMLImageElement): boolean {
     const rect = img.getBoundingClientRect();
     const aspectRatio = rect.width / rect.height;
 
+    // Accept manga panels: reasonable aspect ratio and decent size
+    // Exclude tiny thumbnails, icons, avatars
     return (
-      aspectRatio >= 0.5 &&
-      aspectRatio <= 2.0 &&
+      aspectRatio >= 0.3 &&
+      aspectRatio <= 3.0 &&
+      rect.width >= 100 &&
+      rect.height >= 100 &&
       (rect.width > 200 || rect.height > 200)
     );
   }

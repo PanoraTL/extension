@@ -129,42 +129,51 @@ export class GeminiService {
     return this.retryWithBackoff(async () => {
       console.log("[API] Gemini detectTextRegionsWithOCR called");
 
-      const prompt = `You are analyzing a manga/comic image. Extract ALL text regions with their exact positions, translate them to ${targetLang}, and provide background information.
+      const prompt = `You are analyzing a manga/comic image. Detect every speech bubble, thought bubble, narration box, and sound effect text region.
 
-For EACH text region found, provide:
-1. The original text (exact transcription, preserve line breaks)
-2. Translation to ${targetLang}
-3. Bounding box coordinates as percentages of image dimensions (0-100):
-   - x: horizontal position from left edge (%)
-   - y: vertical position from top edge (%)
-   - width: width of text region (%)
-   - height: height of text region (%)
-4. Background color (hex code, e.g., #FFFFFF) - sample the dominant color behind the text
-5. Background type: "solid" or "pattern"
-6. Confidence score (0.0 to 1.0)
+FOR EACH text region, output a bounding box that covers the ENTIRE BUBBLE SHAPE (the white/colored oval or rounded rectangle), NOT just the text characters inside it. The mask we place must completely hide the original bubble and its text.
 
-Return ONLY a valid JSON array with this exact structure:
+HOW TO CALCULATE PERCENTAGE COORDINATES:
+- Imagine the image is a grid from (0,0) at top-left to (100,100) at bottom-right.
+- "x" = how far from the LEFT edge the bubble starts (0 = far left, 100 = far right)
+- "y" = how far from the TOP edge the bubble starts (0 = top, 100 = bottom)
+- "width" = how wide the bubble is as a fraction of the full image width
+- "height" = how tall the bubble is as a fraction of the full image height
+- Example: a bubble occupying the left quarter of the image, near the top, would be roughly x:2, y:5, width:25, height:15
+
+VERIFICATION STEP: After determining each bounding box, mentally check:
+- If I draw a rectangle at (x%, y%) with size (width% x height%), does it fully enclose the entire speech bubble including its border/outline?
+- Is there at least a small margin (1-2%) beyond the bubble edge on all sides?
+- Adjust if not.
+
+FONT SIZE ESTIMATION:
+- "detectedFontSize" = estimate the size of the characters in the ORIGINAL image pixels. If the image is 800px wide and the characters look like they would be about 20px tall, report 20. Typical range: 14-40.
+- "detectedFontStyle" = "bold" if strokes are thick, "condensed" if characters are narrow/tall, "normal" otherwise.
+
+Return ONLY a valid JSON array. No markdown, no explanation.
+
 [
   {
     "originalText": "こんにちは",
     "translatedText": "Hello",
-    "bounds": { "x": 10.5, "y": 20.3, "width": 30.2, "height": 10.5 },
+    "bounds": {
+      "x": 8.0,
+      "y": 17.0,
+      "width": 36.0,
+      "height": 14.0
+    },
     "background": {
       "type": "solid",
       "color": "#FFFFFF",
       "hasTexture": false
     },
+    "detectedFontSize": 18,
+    "detectedFontStyle": "bold",
     "confidence": 0.95
   }
 ]
 
-IMPORTANT RULES:
-- Coordinates MUST be percentages (0-100) of image width/height, NOT pixels
-- Include ALL text, even small text, sound effects, or text outside speech bubbles
-- Bounding boxes should tightly fit the text region
-- If no text found, return empty array: []
-- Return ONLY valid JSON, no markdown formatting, no explanations
-- For vertical text (common in Japanese manga), still provide left-to-right bounding box`;
+If no text is found, return: []`;
 
       const imagePart = {
         inlineData: {
@@ -194,16 +203,18 @@ IMPORTANT RULES:
             originalText: region.originalText || "",
             translatedText: region.translatedText || region.originalText || "",
             bounds: {
-              x: region.bounds?.x || 0,
-              y: region.bounds?.y || 0,
-              width: region.bounds?.width || 0,
-              height: region.bounds?.height || 0,
+              x: Math.max(0, Math.min(100, region.bounds?.x || 0)),
+              y: Math.max(0, Math.min(100, region.bounds?.y || 0)),
+              width: Math.max(1, Math.min(100, region.bounds?.width || 0)),
+              height: Math.max(1, Math.min(100, region.bounds?.height || 0)),
             },
             background: {
               type: region.background?.type || "solid",
               color: region.background?.color || "#FFFFFF",
               hasTexture: region.background?.hasTexture || false,
             },
+            detectedFontSize: region.detectedFontSize || undefined,
+            detectedFontStyle: region.detectedFontStyle || undefined,
             confidence: region.confidence || 0.5,
           }));
         } else {

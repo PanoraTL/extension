@@ -11,7 +11,7 @@ chrome.runtime.onInstalled.addListener(() => {
 class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
-  private concurrent = 2;
+  private concurrent = 1; // Process one at a time for sequential flow
   private active = 0;
 
   async add<T>(fn: () => Promise<T>): Promise<T> {
@@ -74,39 +74,31 @@ class TranslationCache {
 
 const cache = new TranslationCache();
 
+// Fallback key used when env injection doesn't reach the service worker
+const FALLBACK_API_KEY = "AIzaSyAX2rZm4I5BuXk6FCsMXA7od5godAm1TJQ";
+
 async function initializeServices() {
   console.log("[BACKGROUND] Initializing services...");
 
   const result = await chrome.storage.local.get("gemini_api_key");
   let apiKey = result.gemini_api_key;
 
-  console.log(
-    "[BACKGROUND] API key from storage:",
-    apiKey ? "Found" : "Not found",
-  );
-  console.log(
-    "[BACKGROUND] API key from env:",
-    process.env.PLASMO_PUBLIC_GEMINI_API_KEY ? "Found" : "Not found",
-  );
+  if (!apiKey) {
+    // Try env var (may be undefined if Plasmo didn't inline it for service workers)
+    apiKey = process.env.PLASMO_PUBLIC_GEMINI_API_KEY;
+  }
 
   if (!apiKey) {
-    apiKey = process.env.PLASMO_PUBLIC_GEMINI_API_KEY;
-    if (apiKey) {
-      await chrome.storage.local.set({ gemini_api_key: apiKey });
-      console.log("[BACKGROUND] Saved API key to storage");
-    } else {
-      apiKey = "AIzaSyAX2rZm4I5BuXk6FCsMXA7od5godAm1TJQ";
-      await chrome.storage.local.set({ gemini_api_key: apiKey });
-      console.log("[BACKGROUND] Using hardcoded API key as fallback");
-    }
+    // Use fallback key
+    apiKey = FALLBACK_API_KEY;
+    console.log("[BACKGROUND] Using fallback API key");
   }
 
-  if (apiKey) {
-    geminiService.initialize(apiKey);
-    console.log("[BACKGROUND] Gemini service initialized successfully");
-  } else {
-    console.error("[BACKGROUND] CRITICAL: No Gemini API key available");
-  }
+  // Persist to storage so subsequent activations skip env lookup
+  await chrome.storage.local.set({ gemini_api_key: apiKey });
+
+  geminiService.initialize(apiKey);
+  console.log("[BACKGROUND] Gemini service initialized");
 }
 
 initializeServices();
@@ -115,73 +107,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("[BACKGROUND] Message received:", request.action);
 
   if (request.action === "FETCH_IMAGE") {
-    console.log("[BACKGROUND] Fetching CORS image:", request.url);
-
-    fetch(request.url)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        return response.blob();
-      })
-      .then((blob) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          console.log("[BACKGROUND] FETCH_IMAGE successful");
-          sendResponse({ dataUrl: reader.result });
-        };
-        reader.onerror = (error) => {
-          console.error("[BACKGROUND] FileReader error:", error);
-          sendResponse({ error: "Failed to read image blob" });
-        };
-        reader.readAsDataURL(blob);
-      })
-      .catch((error) => {
-        console.error("[BACKGROUND] Fetch error:", error);
-        sendResponse({ error: error.message });
-      });
-
+    handleFetchImage(request.url)
+      .then((dataUrl) => sendResponse({ dataUrl }))
+      .catch((error) => sendResponse({ error: error.message }));
     return true;
   }
 
   if (request.action === "PROCESS_IMAGES") {
-    console.log("[BACKGROUND] Processing images:", request.images.length);
-
     handleProcessImages(request, sender.tab?.id)
       .then(sendResponse)
       .catch((error) => {
         console.error("[BACKGROUND] Process images error:", error);
-
-        if (sender.tab?.id) {
-          chrome.tabs
-            .sendMessage(sender.tab.id, {
-              action: "ERROR",
-              error: error.message || "Translation failed",
-            })
-            .catch((err) =>
-              console.error("[BACKGROUND] Failed to send error to tab:", err),
-            );
-        }
-
         sendResponse({ success: false, error: error.message });
       });
-
     return true;
   }
 
-  if (request.action === "translate") {
-    handleTranslation(request.text, request.targetLang)
-      .then((result) => sendResponse({ success: true, translation: result }))
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
+  return false;
 });
 
-async function handleTranslation(
-  text: string,
-  _targetLang: string = "en",
-): Promise<string> {
-  return `Translated: ${text}`;
+async function handleFetchImage(url: string): Promise<string> {
+  console.log("[BACKGROUND] Fetching image:", url.substring(0, 80));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        // Mimic a browser image request
+        Accept: "image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+          console.log("[BACKGROUND] FETCH_IMAGE successful");
+          resolve(reader.result as string);
+        } else {
+          reject(new Error("FileReader returned empty result"));
+        }
+      };
+      reader.onerror = () => reject(new Error("Failed to read image blob"));
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function handleProcessImages(request: any, tabId?: number) {
@@ -189,30 +170,25 @@ async function handleProcessImages(request: any, tabId?: number) {
   const { images, settings } = request;
 
   console.log(
-    `[BACKGROUND] Processing ${images.length} images with settings:`,
-    settings,
+    `[BACKGROUND] Processing ${images.length} image(s) with target lang: ${settings.targetLanguage}`,
   );
 
   for (let i = 0; i < images.length; i++) {
     const image = images[i];
-    const imageHash = TranslationCache.hashImage(image.dataUrl);
 
-    console.log(
-      `[BACKGROUND] Processing image ${i + 1}/${images.length}: ${image.id}`,
-    );
+    try {
+      const imageHash = TranslationCache.hashImage(image.dataUrl);
 
-    let textRegions = await cache.get(imageHash, settings.targetLanguage);
+      // Check cache first
+      let textRegions = await cache.get(imageHash, settings.targetLanguage);
 
-    if (!textRegions) {
-      console.log(`[BACKGROUND] Cache miss for ${image.id}, calling API`);
+      if (!textRegions) {
+        console.log(`[BACKGROUND] Cache miss for ${image.id}, calling API`);
 
-      textRegions = await requestQueue.add(async () => {
-        try {
-          console.log("[BACKGROUND] Calling Gemini API...");
-
+        textRegions = await requestQueue.add(async () => {
           if (!geminiService.isInitialized()) {
             throw new Error(
-              "Gemini service not initialized - API key may be missing",
+              "Gemini service not initialized - check API key in .env",
             );
           }
 
@@ -222,41 +198,68 @@ async function handleProcessImages(request: any, tabId?: number) {
           );
 
           console.log(
-            `[BACKGROUND] API returned ${regions.length} text regions`,
+            `[BACKGROUND] API returned ${regions.length} text regions for ${image.id}`,
           );
           return regions;
-        } catch (error: any) {
-          console.error("[BACKGROUND] API call failed:", error);
-          throw error;
-        }
-      });
+        });
 
-      await cache.set(imageHash, settings.targetLanguage, textRegions);
-    } else {
-      console.log(`[BACKGROUND] Cache hit for ${image.id}`);
+        await cache.set(imageHash, settings.targetLanguage, textRegions);
+      } else {
+        console.log(`[BACKGROUND] Cache hit for ${image.id}`);
+      }
+
+      results.push({
+        imageId: image.id,
+        textRegions: textRegions || [],
+        cached: false,
+        error: null,
+      });
+    } catch (error: any) {
+      console.error(
+        `[BACKGROUND] Failed to process ${image.id}:`,
+        error.message,
+      );
+
+      results.push({
+        imageId: image.id,
+        textRegions: [],
+        cached: false,
+        error: error.message || "Processing failed",
+      });
     }
 
-    results.push({
-      imageId: image.id,
-      textRegions: textRegions || [],
-      cached: !!textRegions,
-      error: null,
-    });
-
+    // Send per-image progress to content script
     if (tabId) {
       try {
-        await chrome.tabs.sendMessage(tabId, {
-          action: "PROGRESS_UPDATE",
-          current: i + 1,
-          total: images.length,
-          status: "processing",
+        await new Promise<void>((resolve) => {
+          chrome.tabs.sendMessage(
+            tabId,
+            {
+              action: "PROGRESS_UPDATE",
+              current: i + 1,
+              total: images.length,
+              status: "processing",
+            },
+            () => {
+              // Ignore lastError for progress updates - tab may have closed
+              resolve();
+            },
+          );
         });
-      } catch (err) {
-        console.error("[BACKGROUND] Failed to send progress update:", err);
+      } catch {
+        // Non-critical, continue processing
       }
     }
   }
 
-  console.log(`[BACKGROUND] Completed processing ${results.length} images`);
+  console.log(`[BACKGROUND] Completed processing ${results.length} image(s)`);
+
+  // Only throw if ALL images failed
+  if (results.every((r) => r.error)) {
+    throw new Error(
+      results[results.length - 1]?.error || "All images failed to process",
+    );
+  }
+
   return { success: true, results };
 }
