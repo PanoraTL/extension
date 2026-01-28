@@ -11,7 +11,7 @@ chrome.runtime.onInstalled.addListener(() => {
 class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
-  private concurrent = 1; // Process one at a time for sequential flow
+  private concurrent = 3;
   private active = 0;
 
   async add<T>(fn: () => Promise<T>): Promise<T> {
@@ -74,8 +74,9 @@ class TranslationCache {
 
 const cache = new TranslationCache();
 
-// Fallback key used when env injection doesn't reach the service worker
 const FALLBACK_API_KEY = "AIzaSyAX2rZm4I5BuXk6FCsMXA7od5godAm1TJQ";
+
+let initPromise: Promise<void>;
 
 async function initializeServices() {
   console.log("[BACKGROUND] Initializing services...");
@@ -84,24 +85,21 @@ async function initializeServices() {
   let apiKey = result.gemini_api_key;
 
   if (!apiKey) {
-    // Try env var (may be undefined if Plasmo didn't inline it for service workers)
     apiKey = process.env.PLASMO_PUBLIC_GEMINI_API_KEY;
   }
 
   if (!apiKey) {
-    // Use fallback key
     apiKey = FALLBACK_API_KEY;
     console.log("[BACKGROUND] Using fallback API key");
   }
 
-  // Persist to storage so subsequent activations skip env lookup
   await chrome.storage.local.set({ gemini_api_key: apiKey });
 
   geminiService.initialize(apiKey);
   console.log("[BACKGROUND] Gemini service initialized");
 }
 
-initializeServices();
+initPromise = initializeServices();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("[BACKGROUND] Message received:", request.action);
@@ -123,10 +121,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "PROGRESS_UPDATE" || request.action === "ERROR") {
+    if (sender.tab?.id) {
+      chrome.tabs.sendMessage(sender.tab.id, request).catch(() => {});
+    }
+    sendResponse({ forwarded: true });
+    return false;
+  }
+
   return false;
 });
 
 async function handleFetchImage(url: string): Promise<string> {
+  await initPromise;
   console.log("[BACKGROUND] Fetching image:", url.substring(0, 80));
 
   const controller = new AbortController();
@@ -136,7 +143,6 @@ async function handleFetchImage(url: string): Promise<string> {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        // Mimic a browser image request
         Accept: "image/webp,image/apng,image/*,*/*;q=0.8",
       },
     });
@@ -166,6 +172,8 @@ async function handleFetchImage(url: string): Promise<string> {
 }
 
 async function handleProcessImages(request: any, tabId?: number) {
+  await initPromise;
+
   const results = [];
   const { images, settings } = request;
 
@@ -179,7 +187,6 @@ async function handleProcessImages(request: any, tabId?: number) {
     try {
       const imageHash = TranslationCache.hashImage(image.dataUrl);
 
-      // Check cache first
       let textRegions = await cache.get(imageHash, settings.targetLanguage);
 
       if (!textRegions) {
@@ -228,7 +235,6 @@ async function handleProcessImages(request: any, tabId?: number) {
       });
     }
 
-    // Send per-image progress to content script
     if (tabId) {
       try {
         await new Promise<void>((resolve) => {
@@ -241,20 +247,18 @@ async function handleProcessImages(request: any, tabId?: number) {
               status: "processing",
             },
             () => {
-              // Ignore lastError for progress updates - tab may have closed
               resolve();
             },
           );
         });
       } catch {
-        // Non-critical, continue processing
+        // Non-critical
       }
     }
   }
 
   console.log(`[BACKGROUND] Completed processing ${results.length} image(s)`);
 
-  // Only throw if ALL images failed
   if (results.every((r) => r.error)) {
     throw new Error(
       results[results.length - 1]?.error || "All images failed to process",

@@ -14,17 +14,25 @@ export const config: PlasmoCSConfig = {
 interface OverlayData {
   element: HTMLImageElement;
   textRegions: TextRegion[];
-  wrapper: HTMLElement;
+  container: HTMLElement;
 }
 
-const sendMessageSafely = async (message: any): Promise<any> => {
+const sendToBackground = async (
+  message: any,
+  timeoutMs = 10000,
+): Promise<any> => {
   if (!chrome.runtime?.id) {
     throw new Error("Extension context invalidated - please refresh the page");
   }
 
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Message timeout: ${message.action}`));
+    }, timeoutMs);
+
     try {
       chrome.runtime.sendMessage(message, (response) => {
+        clearTimeout(timer);
         if (chrome.runtime.lastError) {
           reject(
             new Error(
@@ -36,87 +44,85 @@ const sendMessageSafely = async (message: any): Promise<any> => {
         }
       });
     } catch (error) {
+      clearTimeout(timer);
       reject(error);
     }
   });
 };
 
+const notifyPopup = (message: any) => {
+  try {
+    chrome.runtime.sendMessage(message, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch {
+    // Extension context invalidated
+  }
+};
+
 const MangaTranslator = () => {
   const [overlays, setOverlays] = useState<Map<string, OverlayData>>(new Map());
   const processingRef = useRef(false);
+  const translationHandlerRef = useRef<(() => Promise<void>) | null>(null);
 
-  const createWrapper = useCallback(
+  const createOverlayContainer = useCallback(
     (img: HTMLImageElement, imageId: string): HTMLElement => {
-      // Check if wrapper already exists for this image
-      const existing = img.parentElement;
-      if (
-        existing?.classList.contains("manga-translator-wrapper") &&
-        existing.getAttribute("data-image-id") === imageId
-      ) {
-        return existing;
+      const existingContainer = document.querySelector(
+        `[data-overlay-image-id="${imageId}"]`,
+      );
+      if (existingContainer) {
+        existingContainer.remove();
       }
 
-      const wrapper = document.createElement("div");
-      wrapper.className = "manga-translator-wrapper";
-      wrapper.setAttribute("data-image-id", imageId);
+      const container = document.createElement("div");
+      container.className = "manga-translator-overlay-container";
+      container.setAttribute("data-overlay-image-id", imageId);
 
-      // The wrapper must be position:relative so the overlay (position:absolute)
-      // is positioned relative to it. It must NOT set a fixed width/height —
-      // instead it wraps the image tightly so its size always equals the image's
-      // current rendered size.
-      wrapper.style.position = "relative";
-      wrapper.style.display = "inline-block";
-      wrapper.style.verticalAlign = "top";
-      wrapper.style.lineHeight = "0";
-      // Do NOT set explicit width/height — let the image dictate the wrapper size.
+      container.style.position = "absolute";
+      container.style.pointerEvents = "none";
+      container.style.zIndex = "9999";
+      container.style.top = "0px";
+      container.style.left = "0px";
+      container.style.width = "0px";
+      container.style.height = "0px";
 
-      // Make the image fill the wrapper exactly (preserve any site CSS sizing)
-      img.style.display = "block";
-      img.style.width = "100%";
-      img.style.height = "auto";
-
-      const parent = img.parentNode;
-      if (parent) {
-        parent.insertBefore(wrapper, img);
-        wrapper.appendChild(img);
+      let positionedParent: HTMLElement | null = img.parentElement;
+      while (positionedParent) {
+        const style = window.getComputedStyle(positionedParent);
+        if (style.position !== "static") break;
+        positionedParent = positionedParent.parentElement;
       }
 
-      return wrapper;
+      if (!positionedParent) {
+        const directParent = img.parentElement || document.body;
+        directParent.style.position = "relative";
+        positionedParent = directParent;
+      }
+
+      positionedParent.appendChild(container);
+      return container;
     },
     [],
   );
 
   const processSingleImage = useCallback(
     async (
-      image: {
-        id: string;
-        element: HTMLImageElement;
-        dataUrl: string;
-        bounds: DOMRect;
-      },
+      image: { id: string; element: HTMLImageElement; dataUrl: string },
       index: number,
       total: number,
     ) => {
       try {
-        await sendMessageSafely({
-          action: "PROGRESS_UPDATE",
-          current: index,
-          total,
-          status: "processing",
-        }).catch(() => {});
+        console.log(
+          `[TRANSLATOR] Sending image ${index + 1}/${total} to API: ${image.id}`,
+        );
 
-        const response = await sendMessageSafely({
+        const response = await sendToBackground({
           action: "PROCESS_IMAGES",
           images: [
             {
               id: image.id,
               dataUrl: image.dataUrl,
-              bounds: {
-                x: image.bounds.x,
-                y: image.bounds.y,
-                width: image.bounds.width,
-                height: image.bounds.height,
-              },
+              bounds: { x: 0, y: 0, width: 0, height: 0 },
             },
           ],
           settings: {
@@ -126,27 +132,38 @@ const MangaTranslator = () => {
           },
         });
 
+        console.log(
+          `[TRANSLATOR] Response for image ${index + 1}/${total}:`,
+          response?.success,
+          response?.results?.length,
+        );
+
         if (response?.success && response.results?.length > 0) {
           const result = response.results[0];
           if (result.textRegions && result.textRegions.length > 0) {
-            const wrapper = createWrapper(image.element, image.id);
+            const container = createOverlayContainer(image.element, image.id);
 
             setOverlays((prev) => {
               const newMap = new Map(prev);
               newMap.set(image.id, {
                 element: image.element,
                 textRegions: result.textRegions,
-                wrapper,
+                container,
               });
               return newMap;
             });
 
             console.log(
-              `[TRANSLATOR] Applied overlay for image ${index + 1}/${total}: ${result.textRegions.length} regions`,
+              `[TRANSLATOR] Overlay applied for image ${index + 1}/${total}: ${result.textRegions.length} regions`,
             );
           } else {
             console.log(`[TRANSLATOR] No text in image ${index + 1}/${total}`);
           }
+        } else {
+          console.log(
+            `[TRANSLATOR] Empty/failed response for image ${index + 1}/${total}`,
+            response,
+          );
         }
       } catch (error) {
         console.error(
@@ -155,7 +172,7 @@ const MangaTranslator = () => {
         );
       }
     },
-    [createWrapper],
+    [createOverlayContainer],
   );
 
   const handleAutoTranslation = useCallback(async () => {
@@ -165,6 +182,9 @@ const MangaTranslator = () => {
     }
     processingRef.current = true;
 
+    document
+      .querySelectorAll(".manga-translator-overlay-container")
+      .forEach((el) => el.remove());
     setOverlays(new Map());
 
     try {
@@ -174,45 +194,58 @@ const MangaTranslator = () => {
       );
 
       if (images.length === 0) {
-        await sendMessageSafely({
+        notifyPopup({
           action: "ERROR",
           error: "No manga panel images found on this page",
-        }).catch(() => {});
+        });
         return;
       }
 
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        await processSingleImage(
-          {
-            id: img.id,
-            element: img.element,
-            dataUrl: img.dataUrl,
-            bounds: img.bounds,
-          },
+      notifyPopup({
+        action: "PROGRESS_UPDATE",
+        current: 0,
+        total: images.length,
+        status: "processing",
+      });
+
+      const promises = images.map((img, i) => {
+        if (!processingRef.current) return Promise.resolve();
+
+        return processSingleImage(
+          { id: img.id, element: img.element, dataUrl: img.dataUrl },
           i,
           images.length,
-        );
-      }
+        ).then(() => {
+          notifyPopup({
+            action: "PROGRESS_UPDATE",
+            current: i + 1,
+            total: images.length,
+            status: i === images.length - 1 ? "complete" : "processing",
+          });
+        });
+      });
 
-      await sendMessageSafely({
-        action: "PROGRESS_UPDATE",
-        current: images.length,
-        total: images.length,
-        status: "complete",
-      }).catch(() => {});
+      await Promise.all(promises);
 
       console.log("[TRANSLATOR] All images processed");
     } catch (error: any) {
       console.error("[TRANSLATOR] Auto translation error:", error);
-      await sendMessageSafely({
+      notifyPopup({
         action: "ERROR",
         error: error.message || "Translation failed",
-      }).catch(() => {});
+      });
     } finally {
       processingRef.current = false;
     }
   }, [processSingleImage]);
+
+  useEffect(() => {
+    translationHandlerRef.current = handleAutoTranslation;
+  }, [handleAutoTranslation]);
+
+  useEffect(() => {
+    processingRef.current = false;
+  }, []);
 
   useEffect(() => {
     const handleMessage = (
@@ -221,16 +254,21 @@ const MangaTranslator = () => {
       sendResponse: (response?: any) => void,
     ) => {
       if (message.action === "START_TRANSLATION") {
-        handleAutoTranslation();
         sendResponse({ success: true });
-        return true;
+        if (translationHandlerRef.current) {
+          translationHandlerRef.current();
+        }
+        return false;
       }
 
       if (message.action === "STOP_TRANSLATION") {
         processingRef.current = false;
+        document
+          .querySelectorAll(".manga-translator-overlay-container")
+          .forEach((el) => el.remove());
         setOverlays(new Map());
         sendResponse({ success: true });
-        return true;
+        return false;
       }
 
       return false;
@@ -240,19 +278,30 @@ const MangaTranslator = () => {
     return () => {
       chrome.runtime.onMessage.removeListener(handleMessage);
     };
-  }, [handleAutoTranslation]);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      processingRef.current = false;
+      document
+        .querySelectorAll(".manga-translator-overlay-container")
+        .forEach((el) => el.remove());
+    };
+  }, []);
 
   return (
     <>
       {Array.from(overlays.entries()).map(([imageId, data]) => {
-        if (!data.wrapper) return null;
+        if (!data.container) return null;
 
         return createPortal(
           <TranslationOverlay
             key={imageId}
             imageElement={data.element}
             textRegions={data.textRegions}
+            container={data.container}
             onClose={() => {
+              data.container.remove();
               setOverlays((prev) => {
                 const newMap = new Map(prev);
                 newMap.delete(imageId);
@@ -260,7 +309,7 @@ const MangaTranslator = () => {
               });
             }}
           />,
-          data.wrapper as Element,
+          data.container as Element,
         );
       })}
     </>

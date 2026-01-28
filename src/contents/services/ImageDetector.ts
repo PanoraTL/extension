@@ -9,7 +9,7 @@ export class ImageDetector {
 
     return images.filter((img) => {
       if (!bounds) {
-        return this.isVisible(img);
+        return this.isInDocument(img);
       }
 
       const rect = img.getBoundingClientRect();
@@ -28,9 +28,6 @@ export class ImageDetector {
     for (const img of imageElements) {
       try {
         if (!this.isMangaPanel(img)) {
-          console.log(
-            `[IMAGE_DETECTOR] Skipping non-manga image: ${img.src.substring(0, 80)}`,
-          );
           continue;
         }
 
@@ -60,32 +57,34 @@ export class ImageDetector {
   }
 
   static async toDataUrl(img: HTMLImageElement): Promise<string> {
-    // Try direct canvas draw first (works for same-origin)
-    try {
-      const dataUrl = await this.convertWithCanvas(img, false);
-      console.log("[IMAGE_DETECTOR] Direct canvas conversion successful");
-      return dataUrl;
-    } catch (directError) {
-      console.warn(
-        "[IMAGE_DETECTOR] Direct canvas failed, trying CORS anonymous:",
-        directError,
-      );
+    const isCrossOrigin = this.isCrossOrigin(img.src);
+
+    if (!isCrossOrigin) {
+      try {
+        const dataUrl = await this.convertWithCanvas(img, false);
+        console.log(
+          "[IMAGE_DETECTOR] Same-origin canvas conversion successful",
+        );
+        return dataUrl;
+      } catch (error) {
+        console.warn("[IMAGE_DETECTOR] Same-origin canvas failed:", error);
+      }
     }
 
-    // Try with crossOrigin = anonymous
-    try {
-      const dataUrl = await this.convertWithCanvas(img, true);
-      console.log("[IMAGE_DETECTOR] CORS anonymous conversion successful");
-      return dataUrl;
-    } catch (corsError) {
-      console.warn(
-        "[IMAGE_DETECTOR] CORS anonymous failed, trying background fetch:",
-        corsError,
-      );
-    }
-
-    // Last resort: fetch through background service worker
+    console.log(
+      "[IMAGE_DETECTOR] Cross-origin image, using background fetch:",
+      img.src.substring(0, 80),
+    );
     return await this.fetchThroughBackground(img.src);
+  }
+
+  private static isCrossOrigin(url: string): boolean {
+    try {
+      const imageUrl = new URL(url, window.location.href);
+      return imageUrl.origin !== window.location.origin;
+    } catch {
+      return true;
+    }
   }
 
   private static async convertWithCanvas(
@@ -93,17 +92,14 @@ export class ImageDetector {
     forceCors: boolean,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const useExisting = !forceCors && img.complete && img.naturalWidth > 0;
-
-      if (useExisting) {
+      if (!forceCors && img.complete && img.naturalWidth > 0) {
         try {
           const dataUrl = this.drawImageToCanvas(img);
           resolve(dataUrl);
-          return;
         } catch (error) {
           reject(error);
-          return;
         }
+        return;
       }
 
       const newImg = new Image();
@@ -150,17 +146,6 @@ export class ImageDetector {
 
     ctx.drawImage(img, 0, 0);
 
-    // Verify we actually got pixel data (security origin blocks will produce blank canvas)
-    const imageData = ctx.getImageData(0, 0, 1, 1);
-    if (
-      imageData.data[0] === 0 &&
-      imageData.data[1] === 0 &&
-      imageData.data[2] === 0 &&
-      imageData.data[3] === 0
-    ) {
-      // Could be a legitimately transparent pixel, so just proceed
-    }
-
     const maxSize = 2048;
     if (canvas.width > maxSize || canvas.height > maxSize) {
       const scale = maxSize / Math.max(canvas.width, canvas.height);
@@ -187,11 +172,6 @@ export class ImageDetector {
   }
 
   private static async fetchThroughBackground(url: string): Promise<string> {
-    console.log(
-      "[IMAGE_DETECTOR] Fetching through background:",
-      url.substring(0, 80),
-    );
-
     if (!chrome.runtime?.id) {
       throw new Error(
         "Extension context invalidated - please refresh the page",
@@ -200,8 +180,8 @@ export class ImageDetector {
 
     return new Promise<string>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error("Background image fetch timeout (10s)"));
-      }, 10000);
+        reject(new Error("Background image fetch timeout (15s)"));
+      }, 15000);
 
       try {
         chrome.runtime.sendMessage(
@@ -210,10 +190,6 @@ export class ImageDetector {
             clearTimeout(timeout);
 
             if (chrome.runtime.lastError) {
-              console.error(
-                "[IMAGE_DETECTOR] Background fetch error:",
-                chrome.runtime.lastError.message,
-              );
               reject(
                 new Error(
                   chrome.runtime.lastError.message || "Background fetch failed",
@@ -243,6 +219,21 @@ export class ImageDetector {
         );
       }
     });
+  }
+
+  static isInDocument(img: HTMLImageElement): boolean {
+    const rect = img.getBoundingClientRect();
+    const style = window.getComputedStyle(img);
+
+    return (
+      rect.width >= this.MIN_IMAGE_SIZE &&
+      rect.height >= this.MIN_IMAGE_SIZE &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0" &&
+      img.complete &&
+      img.naturalWidth > 0
+    );
   }
 
   static isVisible(img: HTMLImageElement): boolean {
@@ -281,8 +272,7 @@ export class ImageDetector {
 
   static generateImageId(img: HTMLImageElement): string {
     const src = img.src.substring(img.src.lastIndexOf("/") + 1);
-    const pos = img.getBoundingClientRect();
-    const id = `img_${this.imageCounter++}_${src}_${Math.floor(pos.x)}_${Math.floor(pos.y)}`;
+    const id = `img_${this.imageCounter++}_${src}_${img.offsetTop}_${img.offsetLeft}`;
     return id.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 64);
   }
 
@@ -294,8 +284,6 @@ export class ImageDetector {
     const rect = img.getBoundingClientRect();
     const aspectRatio = rect.width / rect.height;
 
-    // Accept manga panels: reasonable aspect ratio and decent size
-    // Exclude tiny thumbnails, icons, avatars
     return (
       aspectRatio >= 0.3 &&
       aspectRatio <= 3.0 &&

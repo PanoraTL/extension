@@ -87,9 +87,83 @@ export class GeminiService {
     }
   }
 
+  private isRetryable(error: any): boolean {
+    const msg = (error.message || "").toLowerCase();
+    const status = error.status || error.statusCode || 0;
+
+    if (
+      status === 429 ||
+      msg.includes("429") ||
+      msg.includes("rate limit") ||
+      msg.includes("quota")
+    ) {
+      return true;
+    }
+    if (
+      status === 503 ||
+      msg.includes("503") ||
+      msg.includes("overloaded") ||
+      msg.includes("unavailable")
+    ) {
+      return true;
+    }
+    if (
+      msg.includes("resource_exhausted") ||
+      msg.includes("resource exhausted")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  private getRetryDelay(
+    error: any,
+    attempt: number,
+    baseDelay: number,
+  ): number {
+    const msg = (error.message || "").toLowerCase();
+    if (msg.includes("429") || msg.includes("rate limit")) {
+      return Math.min(baseDelay * Math.pow(2, attempt + 1), 60000);
+    }
+    return baseDelay * Math.pow(2, attempt);
+  }
+
+  private getUserFacingError(error: any): string {
+    const msg = (error.message || "").toLowerCase();
+    const status = error.status || error.statusCode || 0;
+
+    if (
+      status === 401 ||
+      msg.includes("unauthenticated") ||
+      msg.includes("invalid api key")
+    ) {
+      return "Invalid API key. Please check your Gemini API key in the extension settings.";
+    }
+    if (status === 403 || msg.includes("permission denied")) {
+      return "API key lacks permission. Your Gemini API key may be restricted or the project quota is permanently exhausted.";
+    }
+    if (status === 429 || msg.includes("rate limit")) {
+      return "Gemini API rate limit reached. Please wait a moment and try again.";
+    }
+    if (
+      msg.includes("resource_exhausted") ||
+      msg.includes("resource exhausted") ||
+      msg.includes("quota")
+    ) {
+      return "Gemini API quota exhausted. You may need to upgrade your plan or wait for the quota to reset.";
+    }
+    if (status === 400 || msg.includes("invalid argument")) {
+      return "Invalid request sent to Gemini API. The image may be corrupted or in an unsupported format.";
+    }
+    if (msg.includes("block") || msg.includes("safety")) {
+      return "Gemini blocked this image due to safety filters. Try a different image.";
+    }
+    return error.message || "Unknown Gemini API error";
+  }
+
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
-    maxRetries: number = 3,
+    maxRetries: number = 5,
     initialDelay: number = 1000,
   ): Promise<T> {
     let lastError: any;
@@ -100,22 +174,25 @@ export class GeminiService {
       } catch (error: any) {
         lastError = error;
 
-        if (
-          error.message?.includes("503") ||
-          error.message?.includes("overloaded")
-        ) {
-          const delay = initialDelay * Math.pow(2, i);
+        if (this.isRetryable(error)) {
+          const delay = this.getRetryDelay(error, i, initialDelay);
           console.log(
             `[API] Retry ${i + 1}/${maxRetries} after ${delay}ms due to: ${error.message}`,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         } else {
-          throw error;
+          const userError = new Error(this.getUserFacingError(error));
+          (userError as any).cause = error;
+          console.error("[API] Non-retryable error:", error.message);
+          throw userError;
         }
       }
     }
 
-    throw lastError;
+    const userError = new Error(this.getUserFacingError(lastError));
+    (userError as any).cause = lastError;
+    console.error("[API] All retries exhausted:", lastError?.message);
+    throw userError;
   }
 
   async detectTextRegionsWithOCR(
@@ -129,25 +206,27 @@ export class GeminiService {
     return this.retryWithBackoff(async () => {
       console.log("[API] Gemini detectTextRegionsWithOCR called");
 
-      const prompt = `You are analyzing a manga/comic image. Detect every speech bubble, thought bubble, narration box, and sound effect text region.
+      const prompt = `You are analyzing a manga/comic image. Detect every speech bubble, thought bubble, narration box, and sound effect text region. Translate all detected text to ${targetLang}.
 
-FOR EACH text region, output a bounding box that covers the ENTIRE BUBBLE SHAPE (the white/colored oval or rounded rectangle), NOT just the text characters inside it. The mask we place must completely hide the original bubble and its text.
+FOR EACH text region, output a bounding box that fits EXACTLY around the speech bubble's interior white/colored fill area. Do NOT include the black outline/border of the bubble in the box — the box should sit just inside that border. Do NOT add extra margin beyond the bubble. The goal is a tight fit around the bubble's colored interior.
+
+If a speech bubble is partially cut off at the edge of the image (top, bottom, left, or right), report the bounding box up to the image edge. For example if a bubble extends beyond the bottom of the image, set y + height = 100.
 
 HOW TO CALCULATE PERCENTAGE COORDINATES:
-- Imagine the image is a grid from (0,0) at top-left to (100,100) at bottom-right.
-- "x" = how far from the LEFT edge the bubble starts (0 = far left, 100 = far right)
-- "y" = how far from the TOP edge the bubble starts (0 = top, 100 = bottom)
-- "width" = how wide the bubble is as a fraction of the full image width
-- "height" = how tall the bubble is as a fraction of the full image height
-- Example: a bubble occupying the left quarter of the image, near the top, would be roughly x:2, y:5, width:25, height:15
+- The image spans from (0,0) at the top-left to (100,100) at the bottom-right.
+- "x" = left edge of the bubble interior as % of image width
+- "y" = top edge of the bubble interior as % of image height
+- "width" = bubble interior width as % of image width
+- "height" = bubble interior height as % of image height
+- Example: a bubble whose interior spans from 10% to 40% horizontally and 20% to 35% vertically would be x:10, y:20, width:30, height:15
 
-VERIFICATION STEP: After determining each bounding box, mentally check:
-- If I draw a rectangle at (x%, y%) with size (width% x height%), does it fully enclose the entire speech bubble including its border/outline?
-- Is there at least a small margin (1-2%) beyond the bubble edge on all sides?
-- Adjust if not.
+VERIFICATION STEP: After determining each bounding box, check:
+- Does the rectangle sit INSIDE the black bubble outline, not outside it?
+- Is it tight — no extra whitespace beyond the bubble fill?
+- If the bubble is cut off at an image edge, does the box extend to that edge (0 or 100)?
 
 FONT SIZE ESTIMATION:
-- "detectedFontSize" = estimate the size of the characters in the ORIGINAL image pixels. If the image is 800px wide and the characters look like they would be about 20px tall, report 20. Typical range: 14-40.
+- "detectedFontSize" = estimate character height in the original image pixels. If the image is 800px wide and characters appear about 20px tall, report 20. Typical range: 14-40.
 - "detectedFontStyle" = "bold" if strokes are thick, "condensed" if characters are narrow/tall, "normal" otherwise.
 
 Return ONLY a valid JSON array. No markdown, no explanation.
@@ -157,10 +236,10 @@ Return ONLY a valid JSON array. No markdown, no explanation.
     "originalText": "こんにちは",
     "translatedText": "Hello",
     "bounds": {
-      "x": 8.0,
-      "y": 17.0,
-      "width": 36.0,
-      "height": 14.0
+      "x": 10.0,
+      "y": 20.0,
+      "width": 30.0,
+      "height": 15.0
     },
     "background": {
       "type": "solid",
