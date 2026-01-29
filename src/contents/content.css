@@ -1,0 +1,13 @@
+@font-face {
+  font-family: "Anime Ace";
+  src: url("../assets/fonts/animeace_i.ttf") format("truetype");
+  font-weight: normal;
+  font-style: italic;
+}
+
+.manga-translator-text {
+  font-family: "Anime Ace", "Comic Sans MS", Arial, sans-serif;
+  font-weight: bold;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

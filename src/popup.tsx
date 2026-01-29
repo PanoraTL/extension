@@ -217,8 +217,8 @@ function IndexPopup() {
           50% { transform: translateY(-6px) rotate(2deg); }
         }
         @keyframes arrowPulse {
-          0%, 100% { opacity: 0.4; transform: translateX(0); }
-          50% { opacity: 1; transform: translateX(3px); }
+          0%, 100% { opacity: 0.5; transform: translateX(0); }
+          50% { opacity: 1; transform: translateX(4px); }
         }
         @keyframes scanLine {
           0% { top: 8px; opacity: 0; }
@@ -232,10 +232,7 @@ function IndexPopup() {
           60% { opacity: 0; }
           70%, 100% { opacity: 1; transform: scale(1); }
         }
-        @keyframes dotTrail {
-          0% { left: 0%; opacity: 1; }
-          100% { left: 100%; opacity: 0; }
-        }
+
         @keyframes chipSlideIn {
           0% { opacity: 0; transform: translateX(-6px); }
           100% { opacity: 1; transform: translateX(0); }
@@ -346,10 +343,8 @@ function IndexPopup() {
         .hero-bubble:nth-child(2) { animation-delay: 0.8s; }
         .hero-bubble:nth-child(3) { animation-delay: 1.6s; }
         .hero-arrow {
-          animation: arrowPulse 1.2s ease-in-out infinite;
+          animation: arrowPulse 1.8s ease-in-out infinite;
         }
-        .hero-arrow:nth-child(2) { animation-delay: 0.3s; }
-        .hero-arrow:nth-child(3) { animation-delay: 0.6s; }
         .hero-scan-line {
           position: absolute;
           left: 0;
@@ -364,17 +359,6 @@ function IndexPopup() {
           display: inline-block;
         }
         .hero-glyph:nth-child(2) { animation-delay: 0.7s; }
-        .hero-dot {
-          position: absolute;
-          width: 4px;
-          height: 4px;
-          border-radius: 50%;
-          background: rgba(250,250,250,0.5);
-          top: 50%;
-          animation: dotTrail 1.8s linear infinite;
-        }
-        .hero-dot:nth-child(2) { animation-delay: 0.6s; }
-        .hero-dot:nth-child(3) { animation-delay: 1.2s; }
       `}</style>
 
       {/* Navbar */}
@@ -767,48 +751,26 @@ function IndexPopup() {
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "center",
-                gap: "2px",
-                padding: "0 4px",
-                position: "relative",
+                justifyContent: "center",
                 width: "40px",
                 height: "52px",
               }}
             >
-              <span
+              <svg
                 className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  marginTop: "14px",
-                }}
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#FAFAFA"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                ›
-              </span>
-              <span
-                className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  animationDelay: "0.3s",
-                }}
-              >
-                ›
-              </span>
-              <span
-                className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  animationDelay: "0.6s",
-                }}
-              >
-                ›
-              </span>
-              <div className="hero-dot" style={{ animationDelay: "0s" }} />
-              <div className="hero-dot" style={{ animationDelay: "0.6s" }} />
-              <div className="hero-dot" style={{ animationDelay: "1.2s" }} />
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
             </div>
 
             {/* Panel 2: OCR */}
@@ -877,49 +839,27 @@ function IndexPopup() {
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "center",
-                gap: "2px",
-                padding: "0 4px",
-                position: "relative",
+                justifyContent: "center",
                 width: "40px",
                 height: "52px",
               }}
             >
-              <span
+              <svg
                 className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  marginTop: "14px",
-                  animationDelay: "0.15s",
-                }}
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#FAFAFA"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ animationDelay: "0.4s" }}
               >
-                ›
-              </span>
-              <span
-                className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  animationDelay: "0.45s",
-                }}
-              >
-                ›
-              </span>
-              <span
-                className="hero-arrow"
-                style={{
-                  fontSize: "14px",
-                  color: "#FAFAFA",
-                  animationDelay: "0.75s",
-                }}
-              >
-                ›
-              </span>
-              <div className="hero-dot" style={{ animationDelay: "0.3s" }} />
-              <div className="hero-dot" style={{ animationDelay: "0.9s" }} />
-              <div className="hero-dot" style={{ animationDelay: "1.5s" }} />
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
             </div>
 
             {/* Panel 3: Translated */}

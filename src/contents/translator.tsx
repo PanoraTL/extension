@@ -1,7 +1,7 @@
 import type { PlasmoCSConfig } from "plasmo";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import "~/style.css";
+import "./content.css";
 import type { TextRegion } from "~/types/translator.types";
 import { ImageDetector } from "./services/ImageDetector";
 import { TranslationOverlay } from "./components/TranslationOverlay";
