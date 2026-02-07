@@ -12,6 +12,7 @@
     "fix-icons": "node scripts/fix-icons.js"
   },
   "dependencies": {
+    "better-auth": "1.4.9",
     "@google/generative-ai": "^0.21.0",
     "@radix-ui/react-slot": "^1.1.1",
     "class-variance-authority": "^0.7.1",
@@ -39,7 +40,8 @@
   },
   "manifest": {
     "host_permissions": [
-      "https://*/*"
+      "https://*/*",
+      "http://localhost:3000/*"
     ],
     "permissions": [
       "activeTab",

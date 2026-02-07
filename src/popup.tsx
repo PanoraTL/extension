@@ -5,6 +5,9 @@ import type {
   TranslationSettings,
   TranslationStatus,
 } from "~/types/translator.types";
+import { authClient } from "~/auth/auth-client";
+import { AuthPage } from "~/auth/AuthPage";
+import { AccountMenu } from "~/auth/AccountMenu";
 
 const LANGUAGES = [
   { code: "en", label: "EN" },
@@ -48,6 +51,8 @@ const FEATURES = [
 ];
 
 function IndexPopup() {
+  const { data: session, isPending: authLoading } = authClient.useSession();
+
   const [status, setStatus] = useState<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +166,45 @@ function IndexPopup() {
   const progressPercent =
     progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
   const logoUrl = logoSrc;
+
+  if (authLoading) {
+    return (
+      <div
+        style={{
+          width: "400px",
+          minHeight: "500px",
+          background: "#FAFAFA",
+          fontFamily: "'Inter', sans-serif",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          gap: "12px",
+        }}
+      >
+        <img
+          src={logoUrl}
+          alt="Panora"
+          style={{ width: "48px", height: "48px", borderRadius: "12px" }}
+        />
+        <span
+          style={{
+            display: "inline-block",
+            animation: "spin 1s linear infinite",
+            fontSize: "18px",
+            color: "#C15F3C",
+          }}
+        >
+          ⟳
+        </span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthPage />;
+  }
 
   return (
     <div
@@ -392,21 +436,30 @@ function IndexPopup() {
             Panora
           </span>
         </div>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#FAFAFA",
-            fontSize: "20px",
-            cursor: "pointer",
-            padding: "4px 6px",
-            borderRadius: "6px",
-            lineHeight: 1,
-          }}
-        >
-          ☰
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <AccountMenu
+            user={{
+              name: session.user?.name,
+              email: session.user?.email,
+              image: session.user?.image,
+            }}
+          />
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#FAFAFA",
+              fontSize: "20px",
+              cursor: "pointer",
+              padding: "4px 6px",
+              borderRadius: "6px",
+              lineHeight: 1,
+            }}
+          >
+            ☰
+          </button>
+        </div>
       </div>
 
       {/* Settings Full Overlay */}

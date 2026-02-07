@@ -1,0 +1,15 @@
+{
+  "name": "panora-server",
+  "version": "0.0.1",
+  "description": "Backend server for Panora extension authentication",
+  "private": true,
+  "scripts": {
+    "dev": "npx convex dev",
+    "deploy": "npx convex deploy"
+  },
+  "dependencies": {
+    "better-auth": "1.4.9",
+    "@convex-dev/better-auth": "latest",
+    "convex": "latest"
+  }
+}
