@@ -8,8 +8,9 @@
     "deploy": "npx convex deploy"
   },
   "dependencies": {
-    "better-auth": "1.4.9",
+    "@convex-dev/auth": "^0.0.90",
     "@convex-dev/better-auth": "latest",
+    "better-auth": "1.4.9",
     "convex": "latest"
   }
 }
