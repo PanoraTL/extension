@@ -61,54 +61,20 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     setError(null);
     setLoading(true);
     try {
-      const baseURL =
-        process.env.PLASMO_PUBLIC_AUTH_SERVER_URL ||
-        "https://precise-civet-921.convex.site";
-      const callbackURL = chrome.runtime.getURL("auth-callback.html");
-      const googleAuthURL = `${baseURL}/api/auth/sign-in/google?callbackURL=${encodeURIComponent(callbackURL)}`;
+      const response = await authClient.signIn.social({
+        provider: "google",
+      });
 
-      // Open OAuth in new window
-      const width = 500;
-      const height = 600;
-      const left = (screen.width - width) / 2;
-      const top = (screen.height - height) / 2;
-
-      const authWindow = window.open(
-        googleAuthURL,
-        "Google Sign In",
-        `width=${width},height=${height},left=${left},top=${top}`,
-      );
-
-      if (!authWindow) {
-        setError("Popup blocked. Please allow popups for this extension.");
+      if (response.data?.url) {
+        chrome.tabs.create({
+          url: response.data.url,
+          active: true,
+        });
+        window.close();
+      } else if (response.error) {
+        setError(response.error.message || "Failed to initiate Google sign-in");
         setLoading(false);
-        return;
       }
-
-      // Listen for auth completion
-      const checkAuth = setInterval(async () => {
-        try {
-          const { data: session } = await authClient.getSession();
-          if (session) {
-            clearInterval(checkAuth);
-            authWindow?.close();
-            setLoading(false);
-            onAuthSuccess?.();
-          }
-        } catch (err) {
-          // Still waiting for auth
-        }
-      }, 1000);
-
-      // Cleanup after 5 minutes
-      setTimeout(() => {
-        clearInterval(checkAuth);
-        setLoading(false);
-        if (authWindow && !authWindow.closed) {
-          authWindow.close();
-          setError("Authentication timed out");
-        }
-      }, 300000);
     } catch (err: any) {
       setError(err.message || "Google sign in failed");
       setLoading(false);
@@ -264,7 +230,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           flex: 1,
         }}
       >
-        {/* Google button */}
         <button
           className="auth-google-btn"
           onClick={handleGoogleAuth}
@@ -272,20 +237,20 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           style={{
             padding: "12px 16px",
             background: "#fff",
-            border: "1.5px solid #E89878",
+            border: "1.5px solid #ddd",
             borderRadius: "12px",
             fontSize: "13px",
             fontWeight: 600,
-            color: "#C15F3C",
+            color: "#333",
             cursor: loading ? "not-allowed" : "pointer",
             fontFamily: "'Inter', sans-serif",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             gap: "10px",
-            transition: "border-color 0.2s, box-shadow 0.2s",
-            opacity: loading ? 0.6 : 1,
+            opacity: loading ? 0.5 : 1,
             animation: "fadeInUp 0.35s ease both",
+            transition: "all 0.2s ease",
           }}
         >
           <svg width="18" height="18" viewBox="0 0 24 24">
@@ -309,7 +274,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           Continue with Google
         </button>
 
-        {/* Divider */}
         <div
           style={{
             display: "flex",
@@ -328,7 +292,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
             }}
           />
           <span style={{ fontSize: "11px", color: "#D4775A", fontWeight: 500 }}>
-            or
+            Use Email & Password
           </span>
           <div
             style={{

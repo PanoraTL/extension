@@ -405,7 +405,7 @@ function IndexPopup() {
         .hero-glyph:nth-child(2) { animation-delay: 0.7s; }
       `}</style>
 
-      {/* Navbar */}
+      
       <div
         style={{
           position: "sticky",
@@ -462,7 +462,7 @@ function IndexPopup() {
         </div>
       </div>
 
-      {/* Settings Full Overlay */}
+      
       {showSettings && (
         <div
           className="panora-settings-overlay"
@@ -681,7 +681,7 @@ function IndexPopup() {
         </div>
       )}
 
-      {/* Body */}
+      
       <div
         style={{
           padding: "20px 20px 24px",
@@ -690,7 +690,7 @@ function IndexPopup() {
           gap: "18px",
         }}
       >
-        {/* Animated Hero */}
+        
         <div
           style={{
             borderRadius: "14px",
@@ -750,7 +750,7 @@ function IndexPopup() {
               zIndex: 1,
             }}
           >
-            {/* Panel 1: Source */}
+            
             <div
               className="hero-bubble"
               style={{
@@ -800,7 +800,7 @@ function IndexPopup() {
               </span>
             </div>
 
-            {/* Arrow 1 */}
+            
             <div
               style={{
                 display: "flex",
@@ -826,7 +826,7 @@ function IndexPopup() {
               </svg>
             </div>
 
-            {/* Panel 2: OCR */}
+            
             <div
               className="hero-bubble"
               style={{
@@ -888,7 +888,7 @@ function IndexPopup() {
               </span>
             </div>
 
-            {/* Arrow 2 */}
+            
             <div
               style={{
                 display: "flex",
@@ -915,7 +915,7 @@ function IndexPopup() {
               </svg>
             </div>
 
-            {/* Panel 3: Translated */}
+            
             <div
               className="hero-bubble"
               style={{
@@ -971,7 +971,7 @@ function IndexPopup() {
           </p>
         </div>
 
-        {/* Feature cards with animations */}
+        
         <div
           style={{
             display: "grid",
@@ -999,7 +999,7 @@ function IndexPopup() {
                 cursor: "default",
               }}
             >
-              {/* Step badge */}
+              
               <span
                 style={{
                   position: "absolute",
@@ -1013,7 +1013,7 @@ function IndexPopup() {
               >
                 {feat.step}
               </span>
-              {/* Glow circle behind icon */}
+              
               <div
                 className="feature-glow"
                 style={{
@@ -1027,7 +1027,7 @@ function IndexPopup() {
                   transform: "translateX(-50%)",
                 }}
               />
-              {/* SVG Icon */}
+              
               <svg
                 className="feature-icon-svg"
                 width="22"
@@ -1071,7 +1071,7 @@ function IndexPopup() {
           ))}
         </div>
 
-        {/* Language chip picker */}
+        
         <div
           style={{
             background: "#fff",
@@ -1126,7 +1126,7 @@ function IndexPopup() {
           </div>
         </div>
 
-        {/* Action button */}
+        
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {!isTranslating ? (
             <button
@@ -1198,7 +1198,7 @@ function IndexPopup() {
           )}
         </div>
 
-        {/* Progress */}
+        
         {progress.total > 0 && (
           <div
             style={{
@@ -1261,7 +1261,7 @@ function IndexPopup() {
           </div>
         )}
 
-        {/* Status */}
+        
         {status !== "idle" && (
           <div
             style={{
