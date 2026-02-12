@@ -61,8 +61,54 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     setError(null);
     setLoading(true);
     try {
-      await authClient.signIn.social({ provider: "google" });
-      onAuthSuccess?.();
+      const baseURL =
+        process.env.PLASMO_PUBLIC_AUTH_SERVER_URL ||
+        "https://precise-civet-921.convex.site";
+      const callbackURL = chrome.runtime.getURL("auth-callback.html");
+      const googleAuthURL = `${baseURL}/api/auth/sign-in/google?callbackURL=${encodeURIComponent(callbackURL)}`;
+
+      // Open OAuth in new window
+      const width = 500;
+      const height = 600;
+      const left = (screen.width - width) / 2;
+      const top = (screen.height - height) / 2;
+
+      const authWindow = window.open(
+        googleAuthURL,
+        "Google Sign In",
+        `width=${width},height=${height},left=${left},top=${top}`,
+      );
+
+      if (!authWindow) {
+        setError("Popup blocked. Please allow popups for this extension.");
+        setLoading(false);
+        return;
+      }
+
+      // Listen for auth completion
+      const checkAuth = setInterval(async () => {
+        try {
+          const { data: session } = await authClient.getSession();
+          if (session) {
+            clearInterval(checkAuth);
+            authWindow?.close();
+            setLoading(false);
+            onAuthSuccess?.();
+          }
+        } catch (err) {
+          // Still waiting for auth
+        }
+      }, 1000);
+
+      // Cleanup after 5 minutes
+      setTimeout(() => {
+        clearInterval(checkAuth);
+        setLoading(false);
+        if (authWindow && !authWindow.closed) {
+          authWindow.close();
+          setError("Authentication timed out");
+        }
+      }, 300000);
     } catch (err: any) {
       setError(err.message || "Google sign in failed");
       setLoading(false);
