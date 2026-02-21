@@ -30,9 +30,6 @@ On each translate click, the extension identifies the largest manga panel curren
 **Translation Caching**
 Results are cached in `chrome.storage.local` with a one-hour TTL, so re-translating the same panel is instant.
 
-**Dual Model Translation**
-Switch between Google Gemini 2.5 Flash and OpenAI GPT-4o Mini for translation directly from the extension settings.
-
 **Multi-Language Support**
 Supports translation into any language supported by the Gemini and OpenAI APIs.
 
@@ -43,8 +40,7 @@ Supports translation into any language supported by the Gemini and OpenAI APIs.
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
 - **Detection Model**: YOLOv8 segmentation (`kitsumed/yolov8m_seg-speech-bubble`)
 - **Detection Server**: Python 3 + FastAPI + Ultralytics
-- **Translation / OCR**: Google Gemini 2.5 Flash (primary), Gemini 2.5 Flash Lite (fallback), OpenAI GPT-4o Mini (optional)
-- **Styling**: Tailwind CSS + inline CSS-in-JS
+- **Translation / OCR**: Google Gemini 2.5 Flash (primary), Gemini 2.5 Flash Lite (fallback)
 - **Build**: Plasmo bundler
 
 ---
@@ -67,7 +63,6 @@ The extension uses an auth backend for user sessions. The Gemini API key is pull
 | Variable | Description |
 |---|---|
 | `PLASMO_PUBLIC_GEMINI_API_KEY` | Google Gemini API key — used as a fallback when no session is present. Get one at [aistudio.google.com](https://aistudio.google.com/app/apikey) |
-| `PLASMO_PUBLIC_OPENAI_API_KEY` | OpenAI API key — required if using GPT-4o Mini for translation. Get one at [platform.openai.com](https://platform.openai.com/api-keys) |
 
 > **Note:** The extension shows a login screen by default because it connects to a hosted auth backend. Contributors working on the UI or detection server can bypass this by setting `PLASMO_PUBLIC_GEMINI_API_KEY` directly — the background script will use it when no session API key is found.
 
@@ -178,6 +173,7 @@ Use the conventional commits format:
 - `fix:` for bug fixes
 - `refactor:` for code changes that are not features or fixes
 - `chore:` for tooling, dependencies, or configuration changes
+- `perf:` for performance improvements
 
 **Code Style**
 - TypeScript strict mode is enabled — avoid `any` where possible
