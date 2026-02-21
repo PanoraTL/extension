@@ -7,12 +7,31 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+
+_original_torch_load = torch.load
+def _patched_load(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_load
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from pydantic import BaseModel
 from ultralytics import YOLO
+from ultralytics.nn.modules.head import Detect, Segment
+
+def _segment_forward_patched(self, x):
+    p = self.proto(x[0])
+    bs = p.shape[0]
+    mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)
+    x = Detect.forward(self, x)
+    if self.training:
+        return x, mc, p
+    return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+
+Segment.forward = _segment_forward_patched
 
 MODEL_CACHE_DIR = os.path.expanduser("~/.cache/panora")
 MODEL_CACHE_PATH = os.path.join(MODEL_CACHE_DIR, "model.pt")
@@ -31,13 +50,7 @@ async def lifespan(app: FastAPI):
         if not os.path.exists(MODEL_CACHE_PATH):
             downloaded = hf_hub_download(repo_id=HF_REPO_ID, filename=HF_FILENAME)
             shutil.copy(downloaded, MODEL_CACHE_PATH)
-        _original_torch_load = torch.load
-        def _patched_load(*args, **kwargs):
-            kwargs.setdefault("weights_only", False)
-            return _original_torch_load(*args, **kwargs)
-        torch.load = _patched_load
         yolo_model = YOLO(MODEL_CACHE_PATH)
-        torch.load = _original_torch_load
         model_loaded = True
     except Exception as e:
         print(f"Failed to load model: {e}")

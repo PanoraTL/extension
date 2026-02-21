@@ -82,6 +82,29 @@ The extension uses an auth backend for user sessions. The Gemini API key is pull
 
 ---
 
+### One-command setup
+
+From the `extension/` directory, a single script starts all services — the YOLO detection server, the Convex backend, and the Plasmo extension:
+
+```bash
+./dev.sh
+```
+
+This will:
+1. Create a Python virtual environment and install dependencies (first run only)
+2. Start the YOLO server on `http://127.0.0.1:5001`
+3. Start the Plasmo extension dev build and Convex backend
+
+Then load the extension in Chrome from `ui/build/chrome-mv3-dev`.
+
+Press `Ctrl+C` to stop all services.
+
+---
+
+### Manual setup
+
+---
+
 ### Server
 
 The local detection server runs a YOLOv8 model that detects speech bubble locations. It downloads the model weights on first run (~52 MB).
