@@ -35,7 +35,7 @@ const FEATURES = [
   },
   {
     step: "02",
-    title: "OCR Extract",
+    title: "Bubble Detect",
     desc: "Reads text from speech bubbles",
     paths: ["M4 4h12v12H4zm2 2v8h8V6H6zm1 1h2v1H7zm0 2h4v1H7zm0 2h3v1H7z"],
   },
@@ -884,7 +884,7 @@ function IndexPopup() {
                   fontWeight: 500,
                 }}
               >
-                OCR SCAN
+                DETECTING
               </span>
             </div>
 
@@ -966,8 +966,7 @@ function IndexPopup() {
               zIndex: 1,
             }}
           >
-            Manga panels detected &rarr; OCR scanned &rarr; speech bubbles
-            translated
+            Manga panels detected &rarr; speech bubbles identified &rarr; translated
           </p>
         </div>
 
