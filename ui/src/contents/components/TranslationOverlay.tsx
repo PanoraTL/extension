@@ -59,7 +59,6 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
   onClose,
 }) => {
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
-  const roRef = useRef<ResizeObserver | null>(null);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -91,7 +90,6 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
     rafRef.current = requestAnimationFrame(sync);
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      roRef.current?.disconnect();
     };
   }, [imageElement, container]);
 
