@@ -1,0 +1,47 @@
+# ── ui (Chrome extension) ─────────────────────────────────────────────────────
+ui/node_modules/
+ui/build/
+ui/dist/
+ui/.plasmo/
+ui/.cache/
+ui/tsconfig.tsbuildinfo
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+ui/pnpm-debug.log*
+ui/.env
+ui/.env.local
+ui/.env.production.local
+ui/.env.development.local
+ui/CLAUDE.md
+
+# ── server (Python / FastAPI) ─────────────────────────────────────────────────
+server/venv/
+server/__pycache__/
+server/**/__pycache__/
+server/*.pyc
+server/*.pyo
+server/.env
+server/.cache/
+server/function_spec_*.json
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── AI agent / local configs ──────────────────────────────────────────────────
+.agent/
+.agents/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.windsurf/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.log
