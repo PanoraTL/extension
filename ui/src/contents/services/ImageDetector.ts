@@ -285,8 +285,8 @@ export class ImageDetector {
     const aspectRatio = rect.width / rect.height;
 
     return (
-      aspectRatio >= 0.3 &&
-      aspectRatio <= 3.0 &&
+      aspectRatio >= 0.1 &&
+      aspectRatio <= 5.0 &&
       rect.width >= 100 &&
       rect.height >= 100 &&
       (rect.width > 200 || rect.height > 200)
