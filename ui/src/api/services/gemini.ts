@@ -28,10 +28,8 @@ export class GeminiService {
   }
 
   private switchToFallback() {
-    if (!this.usingFallback) {
-      console.log(`[API] Rate limit hit on ${PRIMARY_MODEL}, switching to ${FALLBACK_MODEL}`);
-      this.usingFallback = true;
-    }
+    console.log(`[API] Rate limit hit on ${PRIMARY_MODEL}, switching to ${FALLBACK_MODEL}`);
+    this.usingFallback = true;
   }
 
   isInitialized(): boolean {
