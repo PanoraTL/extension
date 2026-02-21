@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import type { TextRegion } from "~/types/translator.types";
 
 interface TranslationOverlayProps {
@@ -59,7 +59,6 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
   onClose,
 }) => {
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
-  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     let lastW = 0;
@@ -69,7 +68,6 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
       if (!document.body.contains(imageElement)) {
         container.style.width = "0px";
         container.style.height = "0px";
-        rafRef.current = requestAnimationFrame(sync);
         return;
       }
 
@@ -83,13 +81,24 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
         lastH = h;
         setImgSize({ w, h });
       }
-
-      rafRef.current = requestAnimationFrame(sync);
     };
 
-    rafRef.current = requestAnimationFrame(sync);
+    sync();
+
+    const ro = new ResizeObserver(sync);
+    ro.observe(imageElement);
+
+    const io = new IntersectionObserver(sync, { threshold: 0 });
+    io.observe(imageElement);
+
+    window.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync, { passive: true });
+
     return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+      io.disconnect();
+      window.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
     };
   }, [imageElement, container]);
 
