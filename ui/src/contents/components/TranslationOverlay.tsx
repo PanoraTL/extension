@@ -180,10 +180,10 @@ const getFontFamily = (style?: string): string => {
           const bl = clippedLeft || clippedBottom ? flat : baseR;
           borderRadius = `${tl}px ${tr}px ${br}px ${bl}px`;
           if (clippedTop && !clippedBottom) {
-            padding = "2% 2% 4% 2%";
+            padding = "0 2% 4% 2%";
             alignItems = "flex-start";
           } else if (clippedBottom && !clippedTop) {
-            padding = "4% 2% 2% 2%";
+            padding = "4% 2% 0 2%";
             alignItems = "flex-end";
           } else {
             padding = "2%";
