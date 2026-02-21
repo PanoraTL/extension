@@ -369,7 +369,8 @@ async function handleProcessImages(request: any, tabId?: number) {
             },
           );
         });
-      } catch {
+      } catch (err) {
+        console.warn("[BACKGROUND] Failed to send progress update to tab:", tabId, err);
       }
     }
   }
