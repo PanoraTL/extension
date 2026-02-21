@@ -53,8 +53,9 @@ Supports translation into any language supported by the Gemini and OpenAI APIs.
 
 ```
 extension/
-├── ui/        Chrome extension source (Plasmo + React + TypeScript)
-└── server/    Local YOLO detection server (Python + FastAPI)
+├── ui/            Chrome extension source (Plasmo + React + TypeScript)
+│   └── auth/      Convex auth backend (TypeScript)
+└── server/        Local YOLO detection server (Python + FastAPI)
 ```
 
 ---

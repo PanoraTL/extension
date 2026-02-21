@@ -7,11 +7,11 @@
   "license": "MIT",
   "scripts": {
     "dev": "plasmo dev",
-    "dev:server": "cd server && npm run dev",
+    "dev:server": "cd auth && npm run dev",
     "dev:extension": "plasmo dev",
     "dev:all": "concurrently -n \"SERVER,EXTENSION\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:extension\"",
     "build": "plasmo build",
-    "build:server": "cd server && npm run deploy",
+    "build:server": "cd auth && npm run deploy",
     "build:all": "npm run build && npm run build:server",
     "package": "plasmo package",
     "fix-icons": "node scripts/fix-icons.js"
