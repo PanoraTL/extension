@@ -185,7 +185,13 @@ const MangaTranslator = () => {
         if (!processingRef.current) break;
         const el = imageElements[i];
         let dataUrl: string;
-        try { dataUrl = await ImageDetector.toDataUrl(el); } catch { continue; }
+        try {
+          dataUrl = await ImageDetector.toDataUrl(el);
+        } catch (error) {
+          console.warn("[TRANSLATOR] Failed to load image:", el.src.substring(0, 80), error);
+          notifyPopup({ action: "ERROR", error: "Failed to load image — it may be blocked by CORS or unavailable" });
+          continue;
+        }
         const id = ImageDetector.generateImageId(el);
         await processSingleImage({ id, element: el, dataUrl });
         el.setAttribute("data-panora-translated", "1");
