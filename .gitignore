@@ -1,40 +1,40 @@
-# Dependencies
-node_modules
+# ── ui (Chrome extension) ─────────────────────────────────────────────────────
+ui/node_modules/
+ui/build/
+ui/dist/
+ui/.plasmo/
+ui/.cache/
+ui/tsconfig.tsbuildinfo
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+ui/pnpm-debug.log*
+ui/.env
+ui/.env.local
+ui/.env.production.local
+ui/.env.development.local
+ui/CLAUDE.md
 
-# Production
-build
-dist
-.plasmo
+# ── server (Python / FastAPI) ─────────────────────────────────────────────────
+server/venv/
+server/__pycache__/
+server/**/__pycache__/
+server/*.pyc
+server/*.pyo
+server/.env
+server/.cache/
+server/function_spec_*.json
 
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Environment
-.env
-.env.local
-.env.production.local
-.env.development.local
-
-# IDE
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Misc
-*.log
-.cache/
-
-# Agent / AI skill related files (generated or local agent configs)
-# These directories contain agent skills, credentials, or local test data — do not commit.
+# ── AI agent / local configs ──────────────────────────────────────────────────
 .agent/
 .agents/
 .claude/
@@ -43,5 +43,5 @@ Thumbs.db
 .opencode/
 .windsurf/
 
-CLAUDE.md
-tsconfig.tsbuildinfo
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.log
