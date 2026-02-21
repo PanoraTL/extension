@@ -51,7 +51,6 @@ export interface TranslationSettings {
   autoDetectLanguage: boolean;
   showOriginalText: boolean;
   targetLanguage: string;
-  useGPTTranslation: boolean;
 }
 
 export interface StartTranslationMessage {

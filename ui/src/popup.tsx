@@ -42,7 +42,7 @@ const FEATURES = [
   {
     step: "03",
     title: "AI Translate",
-    desc: "Translates using Gemini & GPT",
+    desc: "Translates using Gemini",
     paths: [
       "M3 8h4l2 3h3l-1 2h2v2H6l-1-2H3V8zm5 6l2 2m0 0l2-2m-2 2v3",
       "M14 3l3 3m-3-3l-1.5 1.5M14 3l1.5 1.5",
@@ -61,13 +61,11 @@ function IndexPopup() {
     autoDetectLanguage: true,
     showOriginalText: false,
     targetLanguage: "en",
-    useGPTTranslation: true,
   });
   const [draftSettings, setDraftSettings] = useState<TranslationSettings>({
     autoDetectLanguage: true,
     showOriginalText: false,
     targetLanguage: "en",
-    useGPTTranslation: true,
   });
   const [saveFlash, setSaveFlash] = useState(false);
 
@@ -598,61 +596,6 @@ function IndexPopup() {
               </div>
             </label>
 
-            <label
-              className="panora-settings-item"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "16px 14px",
-                borderRadius: "12px",
-                background: "#fff",
-                border: "1.5px solid #E89878",
-                cursor: "pointer",
-                transition: "border-color 0.2s, box-shadow 0.2s",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLLabelElement).style.borderColor =
-                  "#C15F3C";
-                (e.currentTarget as HTMLLabelElement).style.boxShadow =
-                  "0 3px 10px rgba(193,95,60,0.14)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLLabelElement).style.borderColor =
-                  "#E89878";
-                (e.currentTarget as HTMLLabelElement).style.boxShadow = "none";
-              }}
-            >
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "3px" }}
-              >
-                <span
-                  style={{
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#C15F3C",
-                  }}
-                >
-                  Use GPT-4o Mini
-                </span>
-                <span style={{ fontSize: "11px", color: "#D4775A" }}>
-                  Switch between Gemini and GPT models
-                </span>
-              </div>
-              <div className="panora-toggle">
-                <input
-                  type="checkbox"
-                  checked={draftSettings.useGPTTranslation}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      useGPTTranslation: e.target.checked,
-                    })
-                  }
-                />
-                <span className="panora-toggle-track" />
-              </div>
-            </label>
           </div>
 
           <button
