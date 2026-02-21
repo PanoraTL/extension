@@ -76,20 +76,12 @@ class TranslationCache {
     });
   }
 
-  static hashImage(dataUrl: string): string {
-    const len = dataUrl.length;
-    const step = Math.max(1, Math.floor(len / 16));
-    let sampled = "";
-    for (let i = 0; i < len; i += step) {
-      sampled += dataUrl[i];
-    }
-    sampled += len.toString();
-    let h = 0x811c9dc5;
-    for (let i = 0; i < sampled.length; i++) {
-      h ^= sampled.charCodeAt(i);
-      h = (h * 0x01000193) >>> 0;
-    }
-    return h.toString(16).padStart(8, "0") + len.toString(16).padStart(8, "0");
+  static async hashImage(dataUrl: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(dataUrl);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 }
 
@@ -296,7 +288,7 @@ async function handleProcessImages(request: any, tabId?: number) {
     const image = images[i];
 
     try {
-      const imageHash = TranslationCache.hashImage(image.dataUrl);
+      const imageHash = await TranslationCache.hashImage(image.dataUrl);
 
       let textRegions = await cache.get(imageHash, settings.targetLanguage);
 
