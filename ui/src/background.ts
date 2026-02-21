@@ -95,8 +95,6 @@ class TranslationCache {
 
 const cache = new TranslationCache();
 
-const FALLBACK_API_KEY = "AIzaSyAX2rZm4I5BuXk6FCsMXA7od5godAm1TJQ";
-
 let initPromise: Promise<void>;
 
 async function initializeServices() {
@@ -110,8 +108,8 @@ async function initializeServices() {
   }
 
   if (!apiKey) {
-    apiKey = FALLBACK_API_KEY;
-    console.log("[BACKGROUND] Using fallback API key");
+    console.error("[BACKGROUND] No Gemini API key found. Set PLASMO_PUBLIC_GEMINI_API_KEY in ui/.env.local");
+    return;
   }
 
   await chrome.storage.local.set({ gemini_api_key: apiKey });

@@ -9,12 +9,11 @@ export const authComponent = createClient(components.betterAuth, {
 
 export const authOptions = (): BetterAuthOptions => {
   const options: BetterAuthOptions = {
-    baseURL:
-      process.env.CONVEX_SITE_URL || "https://precise-civet-921.convex.site",
+    baseURL: process.env.CONVEX_SITE_URL,
     basePath: "/api/auth",
     trustedOrigins: [
       "chrome-extension://*",
-      "https://precise-civet-921.convex.site",
+      ...(process.env.CONVEX_SITE_URL ? [process.env.CONVEX_SITE_URL] : []),
     ],
     emailAndPassword: {
       enabled: true,

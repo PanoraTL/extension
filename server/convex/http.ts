@@ -6,7 +6,7 @@ authComponent.registerRoutes(http, createAuth, {
   cors: {
     allowedOrigins: [
       "chrome-extension://*",
-      "https://precise-civet-921.convex.site",
+      ...(process.env.CONVEX_SITE_URL ? [process.env.CONVEX_SITE_URL] : []),
     ],
   },
 });
