@@ -9,10 +9,6 @@ import numpy as np
 import torch
 
 _original_torch_load = torch.load
-def _patched_load(*args, **kwargs):
-    kwargs.setdefault("weights_only", False)
-    return _original_torch_load(*args, **kwargs)
-torch.load = _patched_load
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,7 +46,11 @@ async def lifespan(app: FastAPI):
         if not os.path.exists(MODEL_CACHE_PATH):
             downloaded = hf_hub_download(repo_id=HF_REPO_ID, filename=HF_FILENAME)
             shutil.copy(downloaded, MODEL_CACHE_PATH)
-        yolo_model = YOLO(MODEL_CACHE_PATH)
+        torch.load = lambda *a, **kw: _original_torch_load(*a, **{**kw, "weights_only": False})
+        try:
+            yolo_model = YOLO(MODEL_CACHE_PATH)
+        finally:
+            torch.load = _original_torch_load
         model_loaded = True
     except Exception as e:
         print(f"Failed to load model: {e}")
