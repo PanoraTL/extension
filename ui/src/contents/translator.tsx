@@ -147,7 +147,7 @@ const MangaTranslator = () => {
     if (processingRef.current) return;
     processingRef.current = true;
 
-    try { await sendToBackground({ action: "CLEAR_CACHE" }); } catch { }
+    try { await sendToBackground({ action: "CLEAR_CACHE" }); } catch (err) { console.warn("[TRANSLATOR] Failed to clear cache:", err); }
 
     try {
       const visiblePanels = ImageDetector.findImages().filter((el) => {
