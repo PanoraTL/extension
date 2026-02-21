@@ -7,6 +7,8 @@ const PYTHON_SERVER_URL = "http://localhost:5001";
 let pythonServerAvailable: boolean | null = null;
 let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 30000;
+let yoloConsecutiveFailures = 0;
+const YOLO_MAX_FAILURES = 3;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
@@ -171,6 +173,7 @@ async function checkPythonServer(): Promise<boolean> {
     if (resp.ok) {
       const data = await resp.json();
       pythonServerAvailable = data.model_loaded === true;
+      if (pythonServerAvailable) yoloConsecutiveFailures = 0;
     } else {
       pythonServerAvailable = false;
     }
@@ -310,10 +313,15 @@ async function handleProcessImages(request: any, tabId?: number) {
                 image.dataUrl,
                 settings.targetLanguage,
               );
+              yoloConsecutiveFailures = 0;
               return regions;
             } catch (yoloError: any) {
-              console.warn(`[BACKGROUND] YOLO failed, falling back to Gemini:`, yoloError.message);
-              pythonServerAvailable = false;
+              yoloConsecutiveFailures++;
+              console.warn(`[BACKGROUND] YOLO failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
+              if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
+                pythonServerAvailable = false;
+                console.warn(`[BACKGROUND] YOLO disabled after ${YOLO_MAX_FAILURES} consecutive failures`);
+              }
             }
           }
 
