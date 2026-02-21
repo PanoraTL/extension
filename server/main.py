@@ -234,7 +234,13 @@ async def detect_bubbles(request: DetectRequest):
                     bubbleType=bubble_type,
                 )
             )
-        except Exception:
+        except Exception as e:
+            try:
+                coords = box.xyxy[0].tolist()
+                conf = float(box.conf[0])
+                print(f"Failed to process box coords={coords} conf={conf:.3f}: {e}")
+            except Exception:
+                print(f"Failed to process box (coords unavailable): {e}")
             continue
 
     return bubbles
