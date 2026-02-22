@@ -2,7 +2,7 @@ import type { PlasmoCSConfig } from "plasmo";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import "./content.css";
-import type { TextRegion } from "~/types/translator.types";
+import type { TextRegion, TranslationSettings } from "~/types/translator.types";
 import { ImageDetector } from "./services/ImageDetector";
 import { TranslationOverlay } from "./components/TranslationOverlay";
 
@@ -90,7 +90,7 @@ const MangaTranslator = () => {
   const [overlays, setOverlays] = useState<Map<string, OverlayData>>(new Map());
   const processingRef = useRef(false);
   const translationHandlerRef = useRef<(() => Promise<void>) | null>(null);
-  const settingsRef = useRef({ targetLanguage: "en", showOriginal: false, autoDetectLanguage: true });
+  const settingsRef = useRef<TranslationSettings>({ targetLanguage: "en", showOriginalText: false, autoDetectLanguage: true });
 
   const createOverlayContainer = useCallback(
     (img: HTMLImageElement, imageId: string): HTMLElement => {
