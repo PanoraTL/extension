@@ -95,18 +95,12 @@ async function initializeServices() {
   console.log("[BACKGROUND] Initializing services...");
 
   const result = await chrome.storage.local.get("gemini_api_key");
-  let apiKey = result.gemini_api_key;
+  const apiKey = result.gemini_api_key;
 
   if (!apiKey) {
-    apiKey = process.env.PLASMO_PUBLIC_GEMINI_API_KEY;
-  }
-
-  if (!apiKey) {
-    console.error("[BACKGROUND] No Gemini API key found. Set PLASMO_PUBLIC_GEMINI_API_KEY in ui/.env.local");
+    console.log("[BACKGROUND] No Gemini API key found. Add one in extension Settings.");
     return;
   }
-
-  await chrome.storage.local.set({ gemini_api_key: apiKey });
 
   geminiService.initialize(apiKey);
   console.log("[BACKGROUND] Gemini service initialized");
@@ -132,6 +126,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true;
+  }
+
+  if (request.action === "UPDATE_API_KEY") {
+    const newKey = request.apiKey?.trim();
+    if (newKey) {
+      geminiService.initialize(newKey);
+      console.log("[BACKGROUND] Gemini service reinitialized with new API key");
+    } else {
+      geminiService.clear();
+      console.log("[BACKGROUND] Gemini service cleared — API key removed");
+    }
+    sendResponse({ success: true });
+    return false;
   }
 
   if (request.action === "CLEAR_CACHE") {
@@ -301,7 +308,7 @@ async function handleProcessImages(request: any, tabId?: number) {
         textRegions = await requestQueue.add(async () => {
           if (!geminiService.isInitialized()) {
             throw new Error(
-              "Gemini service not initialized - check API key in .env",
+              "No API key set. Please add your Gemini API key in the extension Settings.",
             );
           }
 

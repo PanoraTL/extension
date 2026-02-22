@@ -31,7 +31,7 @@ On each translate click, the extension identifies the largest manga panel curren
 Results are cached in `chrome.storage.local` with a one-hour TTL, so re-translating the same panel is instant.
 
 **Multi-Language Support**
-Supports translation into any language supported by the Gemini and OpenAI APIs.
+Supports translation into 12 languages: English, Japanese, Korean, Chinese, Spanish, French, German, Portuguese, Italian, Arabic, Thai, and Vietnamese.
 
 ---
 
@@ -41,6 +41,7 @@ Supports translation into any language supported by the Gemini and OpenAI APIs.
 - **Detection Model**: YOLOv8 segmentation (`kitsumed/yolov8m_seg-speech-bubble`)
 - **Detection Server**: Python 3 + FastAPI + Ultralytics
 - **Translation / OCR**: Google Gemini 2.5 Flash (primary), Gemini 2.5 Flash Lite (fallback)
+- **Auth**: Better Auth + Convex
 - **Build**: Plasmo bundler
 
 ---
@@ -56,15 +57,28 @@ extension/
 
 ---
 
+## API Key Setup
+
+Panora requires a Google Gemini API key to perform OCR and translation. The key is stored locally in the extension and never transmitted anywhere except to the Gemini API.
+
+1. Get a free API key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+2. Open the extension and click the **☰** settings icon
+3. Enter your key in the **Gemini API Key** field
+4. Click **Save Settings**
+
+The key is saved in `chrome.storage.local` and persists across sessions. No environment variables are needed for end users.
+
+---
+
 ## Environment Variables
 
-The extension uses an auth backend for user sessions. The Gemini API key is pulled from the authenticated session at runtime. For local development without a running auth server, set the following in `ui/.env.local` (copy from `ui/.env.example`):
+Only one environment variable is needed, for the auth backend:
 
 | Variable | Description |
 |---|---|
-| `PLASMO_PUBLIC_GEMINI_API_KEY` | Google Gemini API key — used as a fallback when no session is present. Get one at [aistudio.google.com](https://aistudio.google.com/app/apikey) |
+| `PLASMO_PUBLIC_AUTH_SERVER_URL` | URL of the Better Auth + Convex auth server. Defaults to `http://localhost:3000`. |
 
-> **Note:** The extension shows a login screen by default because it connects to a hosted auth backend. Contributors working on the UI or detection server can bypass this by setting `PLASMO_PUBLIC_GEMINI_API_KEY` directly — the background script will use it when no session API key is found.
+Copy `ui/.env.example` to `ui/.env.local` and set this if running your own auth server.
 
 ---
 
@@ -74,7 +88,7 @@ The extension uses an auth backend for user sessions. The Gemini API key is pull
 
 - Node.js 18 or later
 - Python 3.10 or later
-- A Google Gemini API key
+- A Google Gemini API key ([get one here](https://aistudio.google.com/app/apikey))
 
 ---
 
@@ -90,6 +104,7 @@ This will:
 1. Create a Python virtual environment and install dependencies (first run only)
 2. Start the YOLO server on `http://127.0.0.1:5001`
 3. Start the Plasmo extension dev build and Convex backend
+4. Watch for Plasmo rebuilds and re-apply the correct extension icons automatically
 
 Then load the extension in Chrome from `ui/build/chrome-mv3-dev`.
 
@@ -127,11 +142,6 @@ curl http://localhost:5001/health
 ```bash
 cd ui
 npm install
-```
-
-Copy the example env file and fill in your API key:
-
-```bash
 cp .env.example .env.local
 ```
 
@@ -147,6 +157,8 @@ Load the extension in Chrome:
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select `ui/build/chrome-mv3-dev`
+
+Once loaded, open the extension popup, go to **Settings**, and enter your Gemini API key.
 
 The extension will hot-reload UI changes. Background script changes require an extension reload in `chrome://extensions/`.
 

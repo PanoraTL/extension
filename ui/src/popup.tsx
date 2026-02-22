@@ -68,12 +68,21 @@ function IndexPopup() {
     targetLanguage: "en",
   });
   const [saveFlash, setSaveFlash] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [draftApiKey, setDraftApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    chrome.storage.local.get(["translationSettings"], (result) => {
+    chrome.storage.local.get(["translationSettings", "gemini_api_key"], (result) => {
       if (result.translationSettings) {
         setSavedSettings(result.translationSettings);
         setDraftSettings(result.translationSettings);
+      }
+      if (result.gemini_api_key) {
+        const storedKey = result.gemini_api_key.trim();
+        setApiKey(storedKey);
+        setDraftApiKey(storedKey);
       }
     });
   }, []);
@@ -81,8 +90,9 @@ function IndexPopup() {
   useEffect(() => {
     if (showSettings) {
       setDraftSettings(savedSettings);
+      setDraftApiKey(apiKey);
     }
-  }, [showSettings, savedSettings]);
+  }, [showSettings, savedSettings, apiKey]);
 
   useEffect(() => {
     const handleMessage = (message: any) => {
@@ -101,11 +111,22 @@ function IndexPopup() {
   const handleSaveSettings = () => {
     setSavedSettings(draftSettings);
     chrome.storage.local.set({ translationSettings: draftSettings });
+    const trimmedKey = draftApiKey.trim();
+    if (trimmedKey !== apiKey) {
+      setApiKey(trimmedKey);
+      chrome.storage.local.set({ gemini_api_key: trimmedKey });
+      chrome.runtime.sendMessage({ action: "UPDATE_API_KEY", apiKey: trimmedKey });
+    }
     setSaveFlash(true);
     setTimeout(() => setSaveFlash(false), 1200);
   };
 
   const handleStartTranslation = async () => {
+    if (!apiKey.trim()) {
+      setError("No Gemini API key set. Add your key in Settings.");
+      setStatus("error");
+      return;
+    }
     setError(null);
     setProgress({ current: 0, total: 0 });
     setStatus("processing");
@@ -414,7 +435,7 @@ function IndexPopup() {
           alignItems: "center",
           justifyContent: "space-between",
           borderRadius: "0 0 12px 12px",
-          zIndex: 10,
+          zIndex: 30,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -595,6 +616,113 @@ function IndexPopup() {
                 <span className="panora-toggle-track" />
               </div>
             </label>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                padding: "16px 14px",
+                borderRadius: "12px",
+                background: "#fff",
+                border: `1.5px solid ${draftApiKey.trim() ? "#E89878" : "#F5C5B0"}`,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#C15F3C" }}>
+                  Gemini API Key
+                </span>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: "11px",
+                    color: "#D4775A",
+                    textDecoration: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "3px",
+                  }}
+                >
+                  Get a key
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#D4775A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 10L10 2M10 2H5M10 2V7" />
+                  </svg>
+                </a>
+              </div>
+              <span style={{ fontSize: "11px", color: "#D4775A" }}>
+                Required for AI translation. Never shared.
+              </span>
+              <div style={{ position: "relative", marginTop: "4px" }}>
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={draftApiKey}
+                  onChange={(e) => setDraftApiKey(e.target.value)}
+                  placeholder="AIza..."
+                  style={{
+                    padding: "9px 68px 9px 12px",
+                    borderRadius: "8px",
+                    border: "1.5px solid #E89878",
+                    fontSize: "12px",
+                    fontFamily: "'Inter', monospace",
+                    color: "#333",
+                    background: "#FAFAFA",
+                    outline: "none",
+                    width: "100%",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ position: "absolute", right: "6px", top: "50%", transform: "translateY(-50%)", display: "flex", gap: "2px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey((v) => !v)}
+                    title={showApiKey ? "Hide key" : "Show key"}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#C15F3C", display: "flex", alignItems: "center" }}
+                  >
+                    {showApiKey ? (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (draftApiKey) {
+                        try {
+                          await navigator.clipboard.writeText(draftApiKey);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        } catch (error) {
+                          console.error("Failed to copy API key to clipboard:", error);
+                        }
+                      }
+                    }}
+                    title="Copy key"
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center" }}
+                  >
+                    {copied ? (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
 
           </div>
 

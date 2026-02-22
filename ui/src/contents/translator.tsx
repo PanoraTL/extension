@@ -2,7 +2,7 @@ import type { PlasmoCSConfig } from "plasmo";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import "./content.css";
-import type { TextRegion } from "~/types/translator.types";
+import type { TextRegion, TranslationSettings } from "~/types/translator.types";
 import { ImageDetector } from "./services/ImageDetector";
 import { TranslationOverlay } from "./components/TranslationOverlay";
 
@@ -90,6 +90,7 @@ const MangaTranslator = () => {
   const [overlays, setOverlays] = useState<Map<string, OverlayData>>(new Map());
   const processingRef = useRef(false);
   const translationHandlerRef = useRef<(() => Promise<void>) | null>(null);
+  const settingsRef = useRef<TranslationSettings>({ targetLanguage: "en", showOriginalText: false, autoDetectLanguage: true });
 
   const createOverlayContainer = useCallback(
     (img: HTMLImageElement, imageId: string): HTMLElement => {
@@ -121,7 +122,7 @@ const MangaTranslator = () => {
         const response = await sendToBackground({
           action: "PROCESS_IMAGES",
           images: [{ id: image.id, dataUrl: image.dataUrl, bounds: { x: 0, y: 0, width: 0, height: 0 } }],
-          settings: { targetLanguage: "en", showOriginal: false, autoDetectLanguage: true },
+          settings: settingsRef.current,
         });
 
         if (response?.success && response.results?.length > 0) {
@@ -214,6 +215,9 @@ const MangaTranslator = () => {
   useEffect(() => {
     const handleMessage = (message: any, _: chrome.runtime.MessageSender, sendResponse: (r?: any) => void) => {
       if (message.action === "START_TRANSLATION") {
+        if (message.settings) {
+          settingsRef.current = message.settings;
+        }
         sendResponse({ success: true });
         translationHandlerRef.current?.();
         return false;
