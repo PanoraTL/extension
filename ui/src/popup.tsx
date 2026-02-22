@@ -654,72 +654,108 @@ function IndexPopup() {
               <span style={{ fontSize: "11px", color: "#D4775A" }}>
                 Required for AI translation. Never shared.
               </span>
-              <div style={{ position: "relative", marginTop: "4px" }}>
-                <input
-                  type={showApiKey ? "text" : "password"}
-                  value={draftApiKey}
-                  onChange={(e) => setDraftApiKey(e.target.value)}
-                  placeholder="AIza..."
+              <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+                <div
                   style={{
-                    padding: "9px 68px 9px 12px",
+                    flex: 1,
+                    padding: "9px 12px",
                     borderRadius: "8px",
                     border: "1.5px solid #E89878",
                     fontSize: "12px",
-                    fontFamily: "'Inter', monospace",
-                    color: "#333",
+                    fontFamily: "monospace",
+                    color: draftApiKey ? "#333" : "#bbb",
                     background: "#FAFAFA",
-                    outline: "none",
-                    width: "100%",
-                    boxSizing: "border-box",
+                    userSelect: "none",
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
+                    letterSpacing: draftApiKey && !showApiKey ? "2px" : "normal",
                   }}
-                />
-                <div style={{ position: "absolute", right: "6px", top: "50%", transform: "translateY(-50%)", display: "flex", gap: "2px" }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey((v) => !v)}
-                    title={showApiKey ? "Hide key" : "Show key"}
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#C15F3C", display: "flex", alignItems: "center" }}
-                  >
-                    {showApiKey ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
-                        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    ) : (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (draftApiKey) {
+                >
+                  {draftApiKey
+                    ? showApiKey
+                      ? draftApiKey
+                      : "•".repeat(Math.min(draftApiKey.length, 24))
+                    : "No key set"}
+                </div>
+                <div style={{ display: "flex", gap: "0", flexShrink: 0, border: "1.5px solid #E89878", borderRadius: "8px", overflow: "hidden" }}>
+                  {draftApiKey ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey((v) => !v)}
+                        title={showApiKey ? "Hide key" : "Show key"}
+                        style={{ background: showApiKey ? "rgba(193,95,60,0.12)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
+                      >
+                        {showApiKey ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                            <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                            <line x1="1" y1="1" x2="23" y2="23" />
+                          </svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(draftApiKey);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1500);
+                          } catch {
+                          }
+                        }}
+                        title="Copy key"
+                        style={{ background: copied ? "rgba(76,175,80,0.1)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s, color 0.15s" }}
+                      >
+                        {copied ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDraftApiKey(""); setShowApiKey(false); }}
+                        title="Remove key"
+                        style={{ background: "#fff", border: "none", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
                         try {
-                          await navigator.clipboard.writeText(draftApiKey);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 1500);
-                        } catch (error) {
-                          console.error("Failed to copy API key to clipboard:", error);
+                          const text = await navigator.clipboard.readText();
+                          if (text.trim()) setDraftApiKey(text.trim());
+                        } catch {
                         }
-                      }
-                    }}
-                    title="Copy key"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center" }}
-                  >
-                    {copied ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
+                      }}
+                      title="Paste key"
+                      style={{ background: "#C15F3C", border: "none", cursor: "pointer", padding: "0 14px", color: "#fff", fontSize: "11px", fontWeight: 600, fontFamily: "'Inter', sans-serif", display: "flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
                       </svg>
-                    ) : (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                      </svg>
-                    )}
-                  </button>
+                      Paste
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

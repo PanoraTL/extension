@@ -56,7 +56,9 @@
       "storage",
       "scripting",
       "identity",
-      "tabs"
+      "tabs",
+      "clipboardRead",
+      "clipboardWrite"
     ]
   }
 }
