@@ -1,7 +1,7 @@
 {
   "name": "panora-extension",
   "displayName": "Panora",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read any manga, in any language, instantly.",
   "author": "Rithvik",
   "license": "MIT",
@@ -54,7 +54,11 @@
     "permissions": [
       "activeTab",
       "storage",
-      "scripting"
+      "scripting",
+      "identity",
+      "tabs",
+      "clipboardRead",
+      "clipboardWrite"
     ]
   }
 }

@@ -1,8 +1,6 @@
 import { geminiService } from "~/api/services";
 import type { TextRegion, YoloBubble } from "~/types/translator.types";
 
-export {};
-
 const PYTHON_SERVER_URL = "http://localhost:5001";
 let pythonServerAvailable: boolean | null = null;
 let lastHealthCheck = 0;
@@ -166,6 +164,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return false;
 });
+
 
 async function checkPythonServer(): Promise<boolean> {
   const now = Date.now();

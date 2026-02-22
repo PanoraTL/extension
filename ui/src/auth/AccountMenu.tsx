@@ -87,7 +87,6 @@ export function AccountMenu({ user }: AccountMenuProps) {
         }
       `}</style>
 
-      {/* Avatar button */}
       <button
         className="account-avatar"
         onClick={() => setOpen(!open)}
@@ -133,7 +132,6 @@ export function AccountMenu({ user }: AccountMenuProps) {
         )}
       </button>
 
-      {/* Dropdown menu */}
       {open && (
         <div
           style={{
@@ -152,7 +150,6 @@ export function AccountMenu({ user }: AccountMenuProps) {
             fontFamily: "'Inter', sans-serif",
           }}
         >
-          {/* User info */}
           <div
             style={{
               padding: "14px 16px",
@@ -225,7 +222,6 @@ export function AccountMenu({ user }: AccountMenuProps) {
             </div>
           </div>
 
-          {/* Logout button */}
           <div style={{ padding: "8px" }}>
             <button
               className="account-logout-btn"
