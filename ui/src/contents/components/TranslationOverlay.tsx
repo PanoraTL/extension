@@ -151,7 +151,7 @@ const getFontFamily = (style?: string): string => {
           const wPx = (maskW / 100) * imgW;
           const hPx = (maskH / 100) * imgH;
           const shortSide = Math.min(wPx, hPx);
-          const r = bubbleType === "narration" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
+          const r = bubbleType === "narration" || bubbleType === "text_free" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
           borderRadius = `${r}px`;
           padding = "4%";
           alignItems = "center";
@@ -172,7 +172,7 @@ const getFontFamily = (style?: string): string => {
           const wPx = (maskW / 100) * imgW;
           const hPx = (maskH / 100) * imgH;
           const shortSide = Math.min(wPx, hPx);
-          const baseR = bubbleType === "narration" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
+          const baseR = bubbleType === "narration" || bubbleType === "text_free" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
           const flat = Math.round(baseR * 0.15);
           const tl = clippedLeft || clippedTop ? flat : baseR;
           const tr = clippedRight || clippedTop ? flat : baseR;

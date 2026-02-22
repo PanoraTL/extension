@@ -24,7 +24,7 @@ export interface TextRegion {
   confidence: number;
   detectedFontSizePct?: number;
   detectedFontStyle?: "bold" | "normal" | "condensed";
-  bubbleType?: "speech" | "narration" | "tall";
+  bubbleType?: "speech" | "narration" | "tall" | "text_free";
 }
 
 export interface BoundingBox {
@@ -178,7 +178,7 @@ export interface YoloBubble {
   background: BackgroundInfo;
   detectedFontSizePct?: number;
   confidence: number;
-  bubbleType?: "speech" | "narration" | "tall";
+  bubbleType?: "speech" | "narration" | "tall" | "text_free";
 }
 
 export interface CacheEntry {
