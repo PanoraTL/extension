@@ -308,7 +308,7 @@ async function handleProcessImages(request: any, tabId?: number) {
         textRegions = await requestQueue.add(async () => {
           if (!geminiService.isInitialized()) {
             throw new Error(
-              "Gemini service not initialized - check API key in .env",
+              "No API key set. Please add your Gemini API key in the extension Settings.",
             );
           }
 
