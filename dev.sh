@@ -8,8 +8,12 @@ BUILD_DIR="$UI_DIR/build/chrome-mv3-dev"
 cleanup() {
   echo ""
   echo "Shutting down..."
-  kill "$YOLO_PID" "$UI_PID" "$ICON_PID" 2>/dev/null
-  wait "$YOLO_PID" "$UI_PID" "$ICON_PID" 2>/dev/null
+  [ -n "$YOLO_PID" ] && kill "$YOLO_PID" 2>/dev/null || true
+  [ -n "$UI_PID" ]   && kill "$UI_PID"   2>/dev/null || true
+  [ -n "$ICON_PID" ] && kill "$ICON_PID" 2>/dev/null || true
+  [ -n "$YOLO_PID" ] && wait "$YOLO_PID" 2>/dev/null || true
+  [ -n "$UI_PID" ]   && wait "$UI_PID"   2>/dev/null || true
+  [ -n "$ICON_PID" ] && wait "$ICON_PID" 2>/dev/null || true
   exit 0
 }
 trap cleanup INT TERM
