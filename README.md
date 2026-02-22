@@ -174,6 +174,7 @@ Use the conventional commits format:
 - `refactor:` for code changes that are not features or fixes
 - `chore:` for tooling, dependencies, or configuration changes
 - `perf:` for performance improvements
+- `docs:` for documentation improvements
 
 **Code Style**
 - TypeScript strict mode is enabled — avoid `any` where possible
