@@ -176,6 +176,12 @@ async def detect_bubbles(request: DetectRequest):
     scores = detections["scores"].tolist()
     labels = detections["labels"].tolist()
 
+    label_names = {LABEL_BUBBLE: "bubble", LABEL_TEXT_BUBBLE: "text_bubble", LABEL_TEXT_FREE: "text_free"}
+    print(f"[DETECT] image={img_w}x{img_h}, detections={len(boxes)}")
+    for box, score, label in zip(boxes, scores, labels):
+        x1, y1, x2, y2 = box
+        print(f"  {label_names.get(label, label)} score={score:.2f} box=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}) pct=({x1/img_w*100:.1f}%,{y1/img_h*100:.1f}%,{(x2-x1)/img_w*100:.1f}%w,{(y2-y1)/img_h*100:.1f}%h)")
+
     bubble_list = []
     text_bubble_list = []
     text_free_list = []
@@ -191,8 +197,13 @@ async def detect_bubbles(request: DetectRequest):
     used_text_bubbles = set()
     results: List[BubbleResult] = []
 
-    def make_result(overlay_box, crop_box, confidence, is_free=False):
+    def make_result(overlay_box, crop_box, confidence, is_free=False, clip_box=None):
         x1, y1, x2, y2 = overlay_box
+        if clip_box is not None:
+            x1 = max(x1, clip_box[0])
+            y1 = max(y1, clip_box[1])
+            x2 = min(x2, clip_box[2])
+            y2 = min(y2, clip_box[3])
         raw_w = x2 - x1
         raw_h = y2 - y1
 
@@ -227,7 +238,7 @@ async def detect_bubbles(request: DetectRequest):
         crop = pil_image.crop((int(crop_x1), int(crop_y1), int(crop_x2), int(crop_y2)))
         crop_data_url = encode_crop(crop)
         bg_color = sample_background_color(crop)
-        font_size_pct = round((raw_h / img_h) * 100 / 3, 2)
+        font_size_pct = round((raw_h / img_h) * 100 / 2.5, 2)
         bubble_type = classify_bubble_type(raw_w, raw_h, is_free=is_free)
 
         return BubbleResult(
@@ -255,18 +266,23 @@ async def detect_bubbles(request: DetectRequest):
                 best_iou = iou
                 best_idx = i
 
-        crop_box = text_bubble_list[best_idx][0] if best_idx is not None and best_iou > 0.1 else bubble_box
         if best_idx is not None and best_iou > 0.1:
             used_text_bubbles.add(best_idx)
-
-        result = make_result(bubble_box, crop_box, bubble_score)
-        if result is not None:
-            results.append(result)
+            tb_box = text_bubble_list[best_idx][0]
+            result = make_result(tb_box, tb_box, bubble_score, clip_box=bubble_box)
+            if result is not None:
+                results.append(result)
 
     for i, (tb_box, tb_score) in enumerate(text_bubble_list):
         if i in used_text_bubbles:
             continue
-        result = make_result(tb_box, tb_box, tb_score)
+        bx1, by1, bx2, by2 = tb_box
+        bw = bx2 - bx1
+        bh = by2 - by1
+        inset_x = bw * 0.06
+        inset_y = bh * 0.04
+        clip = [bx1 + inset_x, by1 + inset_y, bx2 - inset_x, by2 - inset_y]
+        result = make_result(tb_box, tb_box, tb_score, clip_box=clip)
         if result is not None:
             results.append(result)
 
