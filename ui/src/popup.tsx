@@ -695,11 +695,15 @@ function IndexPopup() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (draftApiKey) {
-                        navigator.clipboard.writeText(draftApiKey);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
+                        try {
+                          await navigator.clipboard.writeText(draftApiKey);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        } catch (error) {
+                          console.error("Failed to copy API key to clipboard:", error);
+                        }
                       }
                     }}
                     title="Copy key"
