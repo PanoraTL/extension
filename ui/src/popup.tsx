@@ -80,8 +80,9 @@ function IndexPopup() {
         setDraftSettings(result.translationSettings);
       }
       if (result.gemini_api_key) {
-        setApiKey(result.gemini_api_key);
-        setDraftApiKey(result.gemini_api_key);
+        const storedKey = result.gemini_api_key.trim();
+        setApiKey(storedKey);
+        setDraftApiKey(storedKey);
       }
     });
   }, []);
@@ -121,7 +122,7 @@ function IndexPopup() {
   };
 
   const handleStartTranslation = async () => {
-    if (!apiKey) {
+    if (!apiKey.trim()) {
       setError("No Gemini API key set. Add your key in Settings.");
       setStatus("error");
       return;
