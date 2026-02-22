@@ -2,12 +2,14 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+UI_DIR="$ROOT/ui"
+BUILD_DIR="$UI_DIR/build/chrome-mv3-dev"
 
 cleanup() {
   echo ""
   echo "Shutting down..."
-  kill "$YOLO_PID" "$UI_PID" 2>/dev/null
-  wait "$YOLO_PID" "$UI_PID" 2>/dev/null
+  kill "$YOLO_PID" "$UI_PID" "$ICON_PID" 2>/dev/null
+  wait "$YOLO_PID" "$UI_PID" "$ICON_PID" 2>/dev/null
   exit 0
 }
 trap cleanup INT TERM
@@ -33,8 +35,6 @@ YOLO_PID=$!
 deactivate
 
 # ── UI (Plasmo + Convex) ──────────────────────────────────────────────────────
-UI_DIR="$ROOT/ui"
-
 if [ ! -d "$UI_DIR/node_modules" ]; then
   echo "[UI] Installing npm dependencies..."
   npm install --prefix "$UI_DIR"
@@ -43,6 +43,22 @@ fi
 echo "[UI] Starting Plasmo extension + Convex backend..."
 npm run dev:all --prefix "$UI_DIR" &
 UI_PID=$!
+
+# ── Icon fixer (re-applies orange icons after each Plasmo rebuild) ────────────
+icon_fix_loop() {
+  while true; do
+    if [ -d "$BUILD_DIR" ]; then
+      if [ ! -f "$BUILD_DIR/.icon_stamp" ] || \
+         [ -n "$(find "$BUILD_DIR" -name "icon*.png" -newer "$BUILD_DIR/.icon_stamp" 2>/dev/null | head -1)" ]; then
+        node "$UI_DIR/scripts/fix-icons.js" 2>/dev/null && touch "$BUILD_DIR/.icon_stamp"
+      fi
+    fi
+    sleep 3
+  done
+}
+
+icon_fix_loop &
+ICON_PID=$!
 
 # ── Wait ──────────────────────────────────────────────────────────────────────
 echo ""
