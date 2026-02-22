@@ -68,12 +68,18 @@ function IndexPopup() {
     targetLanguage: "en",
   });
   const [saveFlash, setSaveFlash] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [draftApiKey, setDraftApiKey] = useState("");
 
   useEffect(() => {
-    chrome.storage.local.get(["translationSettings"], (result) => {
+    chrome.storage.local.get(["translationSettings", "gemini_api_key"], (result) => {
       if (result.translationSettings) {
         setSavedSettings(result.translationSettings);
         setDraftSettings(result.translationSettings);
+      }
+      if (result.gemini_api_key) {
+        setApiKey(result.gemini_api_key);
+        setDraftApiKey(result.gemini_api_key);
       }
     });
   }, []);
@@ -81,8 +87,9 @@ function IndexPopup() {
   useEffect(() => {
     if (showSettings) {
       setDraftSettings(savedSettings);
+      setDraftApiKey(apiKey);
     }
-  }, [showSettings, savedSettings]);
+  }, [showSettings, savedSettings, apiKey]);
 
   useEffect(() => {
     const handleMessage = (message: any) => {
@@ -101,11 +108,22 @@ function IndexPopup() {
   const handleSaveSettings = () => {
     setSavedSettings(draftSettings);
     chrome.storage.local.set({ translationSettings: draftSettings });
+    const trimmedKey = draftApiKey.trim();
+    if (trimmedKey !== apiKey) {
+      setApiKey(trimmedKey);
+      chrome.storage.local.set({ gemini_api_key: trimmedKey });
+      chrome.runtime.sendMessage({ action: "UPDATE_API_KEY", apiKey: trimmedKey });
+    }
     setSaveFlash(true);
     setTimeout(() => setSaveFlash(false), 1200);
   };
 
   const handleStartTranslation = async () => {
+    if (!apiKey) {
+      setError("No Gemini API key set. Add your key in Settings.");
+      setStatus("error");
+      return;
+    }
     setError(null);
     setProgress({ current: 0, total: 0 });
     setStatus("processing");
@@ -596,6 +614,64 @@ function IndexPopup() {
               </div>
             </label>
 
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              padding: "16px 14px",
+              borderRadius: "12px",
+              background: "#fff",
+              border: `1.5px solid ${draftApiKey.trim() ? "#E89878" : "#F5C5B0"}`,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "#C15F3C" }}>
+                Gemini API Key
+              </span>
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: "11px",
+                  color: "#D4775A",
+                  textDecoration: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "3px",
+                }}
+              >
+                Get a key
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#D4775A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 10L10 2M10 2H5M10 2V7" />
+                </svg>
+              </a>
+            </div>
+            <span style={{ fontSize: "11px", color: "#D4775A" }}>
+              Required for AI translation. Never shared.
+            </span>
+            <input
+              type="password"
+              value={draftApiKey}
+              onChange={(e) => setDraftApiKey(e.target.value)}
+              placeholder="AIza..."
+              style={{
+                marginTop: "4px",
+                padding: "9px 12px",
+                borderRadius: "8px",
+                border: "1.5px solid #E89878",
+                fontSize: "12px",
+                fontFamily: "'Inter', monospace",
+                color: "#333",
+                background: "#FAFAFA",
+                outline: "none",
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
           </div>
 
           <button
