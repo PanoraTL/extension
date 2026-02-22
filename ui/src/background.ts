@@ -121,7 +121,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .then(sendResponse)
       .catch((error) => {
         console.error("[BACKGROUND] Process images error:", error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({ success: false, error: error.message, isRateLimit: !!(error as any).isRateLimit });
       });
     return true;
   }
@@ -293,7 +293,11 @@ async function handleProcessImages(request: any, tabId?: number) {
     `[BACKGROUND] Processing ${images.length} image(s) with target lang: ${settings.targetLanguage}`,
   );
 
+  let rateLimitHit = false;
+
   for (let i = 0; i < images.length; i++) {
+    if (rateLimitHit) break;
+
     const image = images[i];
 
     try {
@@ -358,6 +362,24 @@ async function handleProcessImages(request: any, tabId?: number) {
         `[BACKGROUND] Failed to process ${image.id}:`,
         error.message,
       );
+
+      if (error.isRateLimit || geminiService.isRateLimit(error)) {
+        rateLimitHit = true;
+        const rateLimitMsg = error.message || "Gemini API rate limit reached. Please wait and try again.";
+        if (tabId) {
+          chrome.tabs.sendMessage(tabId, {
+            action: "ERROR",
+            error: rateLimitMsg,
+            isRateLimit: true,
+          }).catch(() => {});
+        }
+        chrome.runtime.sendMessage({
+          action: "ERROR",
+          error: rateLimitMsg,
+          isRateLimit: true,
+        }).catch(() => {});
+        throw Object.assign(new Error(rateLimitMsg), { isRateLimit: true });
+      }
 
       results.push({
         imageId: image.id,

@@ -136,9 +136,14 @@ const MangaTranslator = () => {
             });
             console.log(`[TRANSLATOR] Overlay applied: ${result.textRegions.length} regions`);
           }
+        } else if (!response?.success && response?.error) {
+          const err = new Error(response.error) as any;
+          err.isRateLimit = response.isRateLimit || false;
+          throw err;
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("[TRANSLATOR] Failed to process image:", error);
+        if (error.isRateLimit) throw error;
       }
     },
     [createOverlayContainer],
@@ -222,7 +227,7 @@ const MangaTranslator = () => {
         translationHandlerRef.current?.();
         return false;
       }
-      if (message.action === "STOP_TRANSLATION") {
+      if (message.action === "STOP_TRANSLATION" || (message.action === "ERROR" && message.isRateLimit)) {
         processingRef.current = false;
         document.querySelectorAll(".manga-translator-overlay-container").forEach((el) => el.remove());
         document.querySelectorAll("[data-panora-translated]").forEach((el) => el.removeAttribute("data-panora-translated"));
