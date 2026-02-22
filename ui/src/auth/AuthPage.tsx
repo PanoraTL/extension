@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import logoSrc from "~/assets/orangesquare.png";
 import { authClient } from "./auth-client";
 
@@ -57,20 +57,35 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     }
   };
 
+  useEffect(() => {
+    const handler = (message: any) => {
+      if (message.action === "GOOGLE_AUTH_SUCCESS") {
+        onAuthSuccess?.();
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
+  }, [onAuthSuccess]);
+
   const handleGoogleAuth = async () => {
     setError(null);
     setLoading(true);
     try {
+      const callbackUrl = chrome.runtime.getURL("tabs/auth-callback.html");
       const response = await authClient.signIn.social({
         provider: "google",
+        callbackURL: callbackUrl,
       });
 
       if (response.data?.url) {
-        chrome.tabs.create({
+        chrome.windows.create({
           url: response.data.url,
-          active: true,
+          type: "popup",
+          width: 500,
+          height: 650,
+          focused: true,
         });
-        window.close();
+        setLoading(false);
       } else if (response.error) {
         setError(response.error.message || "Failed to initiate Google sign-in");
         setLoading(false);

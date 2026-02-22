@@ -10,12 +10,10 @@ function AuthCallback() {
         // Get the session after OAuth callback
         const session = await authClient.getSession();
 
-        if (session) {
-          setStatus("Authentication successful! You can close this page.");
-          // Close this tab after a short delay
-          setTimeout(() => {
-            window.close();
-          }, 2000);
+        if (session?.data) {
+          setStatus("Authentication successful!");
+          chrome.runtime.sendMessage({ action: "GOOGLE_AUTH_SUCCESS" });
+          window.close();
         } else {
           setStatus("Authentication failed. Please try again.");
         }
