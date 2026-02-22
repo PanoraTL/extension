@@ -133,6 +133,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (newKey) {
       geminiService.initialize(newKey);
       console.log("[BACKGROUND] Gemini service reinitialized with new API key");
+    } else {
+      geminiService.clear();
+      console.log("[BACKGROUND] Gemini service cleared — API key removed");
     }
     sendResponse({ success: true });
     return false;

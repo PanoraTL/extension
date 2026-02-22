@@ -32,6 +32,13 @@ export class GeminiService {
     this.usingFallback = true;
   }
 
+  clear() {
+    this.genAI = null;
+    this.model = null;
+    this.fallbackModel = null;
+    this.usingFallback = false;
+  }
+
   isInitialized(): boolean {
     return this.model !== null;
   }
