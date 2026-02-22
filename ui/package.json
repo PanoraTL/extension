@@ -55,7 +55,8 @@
       "activeTab",
       "storage",
       "scripting",
-      "identity"
+      "identity",
+      "tabs"
     ]
   }
 }

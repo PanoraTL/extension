@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import logoSrc from "~/assets/orangesquare.png";
 import { authClient } from "./auth-client";
 
@@ -57,35 +57,42 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     }
   };
 
-  useEffect(() => {
-    const handler = (message: any) => {
-      if (message.action === "GOOGLE_AUTH_SUCCESS") {
-        onAuthSuccess?.();
-      }
-    };
-    chrome.runtime.onMessage.addListener(handler);
-    return () => chrome.runtime.onMessage.removeListener(handler);
-  }, [onAuthSuccess]);
-
   const handleGoogleAuth = async () => {
     setError(null);
     setLoading(true);
     try {
-      const callbackUrl = chrome.runtime.getURL("tabs/auth-callback.html");
-      const response = await authClient.signIn.social({
-        provider: "google",
-        callbackURL: callbackUrl,
-      });
+      const response = await authClient.signIn.social({ provider: "google" });
 
       if (response.data?.url) {
-        chrome.windows.create({
+        const win = await chrome.windows.create({
           url: response.data.url,
           type: "popup",
           width: 500,
           height: 650,
           focused: true,
         });
-        setLoading(false);
+
+        const poll = setInterval(async () => {
+          try {
+            const session = await authClient.getSession();
+            if (session?.data) {
+              clearInterval(poll);
+              chrome.windows.onRemoved.removeListener(onWinRemoved);
+              if (win.id) chrome.windows.remove(win.id).catch(() => {});
+              onAuthSuccess?.();
+            }
+          } catch {
+          }
+        }, 1500);
+
+        const onWinRemoved = (windowId: number) => {
+          if (windowId === win.id) {
+            clearInterval(poll);
+            chrome.windows.onRemoved.removeListener(onWinRemoved);
+            setLoading(false);
+          }
+        };
+        chrome.windows.onRemoved.addListener(onWinRemoved);
       } else if (response.error) {
         setError(response.error.message || "Failed to initiate Google sign-in");
         setLoading(false);
@@ -151,7 +158,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
         }
       `}</style>
 
-      {/* Header with gradient */}
       <div
         style={{
           background:
@@ -166,7 +172,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           borderRadius: "0 0 16px 16px",
         }}
       >
-        {/* Decorative circles */}
         <div
           style={{
             position: "absolute",
@@ -235,7 +240,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
         </div>
       </div>
 
-      {/* Auth form */}
       <div
         style={{
           padding: "24px 24px 20px",
@@ -319,7 +323,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           />
         </div>
 
-        {/* Email form */}
         <form
           onSubmit={handleEmailAuth}
           style={{ display: "flex", flexDirection: "column", gap: "10px" }}
@@ -436,7 +439,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
             />
           </div>
 
-          {/* Error message */}
           {error && (
             <div
               style={{
@@ -453,7 +455,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
             </div>
           )}
 
-          {/* Submit button */}
           <button
             className="auth-btn"
             type="submit"
@@ -508,7 +509,6 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           </button>
         </form>
 
-        {/* Switch mode link */}
         <div
           style={{
             textAlign: "center",
