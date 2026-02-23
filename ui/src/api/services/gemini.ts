@@ -169,7 +169,9 @@ export class GeminiService {
     if (
       status === 401 ||
       msg.includes("unauthenticated") ||
-      msg.includes("invalid api key")
+      msg.includes("invalid api key") ||
+      msg.includes("api key not valid") ||
+      msg.includes("api_key_invalid")
     ) {
       return "Invalid API key. Please check your Gemini API key in the extension settings.";
     }

@@ -117,7 +117,7 @@ const MangaTranslator = () => {
   );
 
   const processSingleImage = useCallback(
-    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean }> => {
+    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean; success: boolean }> => {
       try {
         const response = await sendToBackground({
           action: "PROCESS_IMAGES",
@@ -127,7 +127,7 @@ const MangaTranslator = () => {
 
         if (response?.isRateLimit) {
           console.error("[TRANSLATOR] Rate limit hit:", response.error);
-          return { isRateLimit: true };
+          return { isRateLimit: true, success: false };
         }
 
         if (response?.success && response.results?.length > 0) {
@@ -141,13 +141,14 @@ const MangaTranslator = () => {
             });
             console.log(`[TRANSLATOR] Overlay applied: ${result.textRegions.length} regions`);
           }
+          return { isRateLimit: false, success: true };
         } else if (!response?.success && response?.error) {
           console.error("[TRANSLATOR] Failed to process image:", response.error);
         }
       } catch (error: any) {
         console.error("[TRANSLATOR] Failed to process image:", error);
       }
-      return { isRateLimit: false };
+      return { isRateLimit: false, success: false };
     },
     [createOverlayContainer],
   );
@@ -202,17 +203,21 @@ const MangaTranslator = () => {
           continue;
         }
         const id = ImageDetector.generateImageId(el);
-        const { isRateLimit } = await processSingleImage({ id, element: el, dataUrl });
+        const { isRateLimit, success } = await processSingleImage({ id, element: el, dataUrl });
         if (isRateLimit) {
           notifyPopup({ action: "ERROR", error: "Gemini API rate limit reached. Please wait and try again.", isRateLimit: true });
           return;
         }
-        el.setAttribute("data-panora-translated", "1");
-        processed++;
-        notifyPopup({ action: "PROGRESS_UPDATE", current: i + 1, total, status: i === imageElements.length - 1 ? "complete" : "processing" });
+        if (success) {
+          el.setAttribute("data-panora-translated", "1");
+          processed++;
+        }
+        if (i < imageElements.length - 1) {
+          notifyPopup({ action: "PROGRESS_UPDATE", current: i + 1, total, status: "processing" });
+        }
       }
 
-      if (processed === 0) notifyPopup({ action: "ERROR", error: "Could not load any manga panel images" });
+      if (processed === 0) notifyPopup({ action: "ERROR", error: "Could not translate any panels. Check your API key and try again." });
       else notifyPopup({ action: "PROGRESS_UPDATE", current: total, total, status: "complete" });
     } catch (error: any) {
       notifyPopup({ action: "ERROR", error: error.message || "Translation failed" });
