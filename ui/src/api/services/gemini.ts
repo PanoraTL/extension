@@ -9,6 +9,7 @@ export class GeminiService {
   private model: any = null;
   private fallbackModel: any = null;
   private usingFallback = false;
+  public lastCallWasRateLimited = false;
 
   constructor(apiKey?: string) {
     if (apiKey) {
@@ -200,6 +201,7 @@ export class GeminiService {
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
   ): Promise<T> {
+    this.lastCallWasRateLimited = false;
     try {
       return await fn();
     } catch (error: any) {
@@ -208,7 +210,9 @@ export class GeminiService {
           this.switchToFallback();
           console.log(`[API] Rate limit on primary model, retrying once with fallback`);
           try {
-            return await fn();
+            const result = await fn();
+            this.lastCallWasRateLimited = true;
+            return result;
           } catch (fallbackError: any) {
             const userError = new Error(this.getUserFacingError(fallbackError));
             (userError as any).cause = fallbackError;

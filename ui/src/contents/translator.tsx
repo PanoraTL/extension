@@ -117,7 +117,7 @@ const MangaTranslator = () => {
   );
 
   const processSingleImage = useCallback(
-    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean; success: boolean }> => {
+    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean; success: boolean; wasRateLimited: boolean }> => {
       try {
         const response = await sendToBackground({
           action: "PROCESS_IMAGES",
@@ -127,7 +127,7 @@ const MangaTranslator = () => {
 
         if (response?.isRateLimit) {
           console.error("[TRANSLATOR] Rate limit hit:", response.error);
-          return { isRateLimit: true, success: false };
+          return { isRateLimit: true, success: false, wasRateLimited: false };
         }
 
         if (response?.success && response.results?.length > 0) {
@@ -141,14 +141,14 @@ const MangaTranslator = () => {
             });
             console.log(`[TRANSLATOR] Overlay applied: ${result.textRegions.length} regions`);
           }
-          return { isRateLimit: false, success: true };
+          return { isRateLimit: false, success: true, wasRateLimited: response.wasRateLimited === true };
         } else if (!response?.success && response?.error) {
           console.error("[TRANSLATOR] Failed to process image:", response.error);
         }
       } catch (error: any) {
         console.error("[TRANSLATOR] Failed to process image:", error);
       }
-      return { isRateLimit: false, success: false };
+      return { isRateLimit: false, success: false, wasRateLimited: false };
     },
     [createOverlayContainer],
   );
@@ -191,6 +191,7 @@ const MangaTranslator = () => {
       notifyPopup({ action: "PROGRESS_UPDATE", current: 0, total, status: "processing" });
 
       let processed = 0;
+      let anyRateLimited = false;
       for (let i = 0; i < imageElements.length; i++) {
         if (!processingRef.current) break;
         const el = imageElements[i];
@@ -203,11 +204,12 @@ const MangaTranslator = () => {
           continue;
         }
         const id = ImageDetector.generateImageId(el);
-        const { isRateLimit, success } = await processSingleImage({ id, element: el, dataUrl });
+        const { isRateLimit, success, wasRateLimited } = await processSingleImage({ id, element: el, dataUrl });
         if (isRateLimit) {
           notifyPopup({ action: "ERROR", error: "Gemini API rate limit reached. Please wait and try again.", isRateLimit: true });
           return;
         }
+        if (wasRateLimited) anyRateLimited = true;
         if (success) {
           el.setAttribute("data-panora-translated", "1");
           processed++;
@@ -218,6 +220,7 @@ const MangaTranslator = () => {
       }
 
       if (processed === 0) notifyPopup({ action: "ERROR", error: "Could not translate any panels. Check your API key and try again." });
+      else if (anyRateLimited) notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed slowly via fallback model.", isRateLimit: true });
       else notifyPopup({ action: "PROGRESS_UPDATE", current: total, total, status: "complete" });
     } catch (error: any) {
       notifyPopup({ action: "ERROR", error: error.message || "Translation failed" });

@@ -127,7 +127,8 @@ function IndexPopup() {
         }
       } else if (message.action === "ERROR") {
         if (statusRef.current !== "idle") {
-          showErrorToast("Translation failed", message.error || undefined);
+          const title = message.isRateLimit ? "Rate limit hit" : "Translation failed";
+          showErrorToast(title, message.error || undefined);
         }
         statusRef.current = "idle";
         setStatus("idle");

@@ -353,6 +353,7 @@ async function handleProcessImages(request: any, tabId?: number) {
         textRegions: textRegions || [],
         cached: false,
         error: null,
+        wasRateLimited: geminiService.lastCallWasRateLimited,
       });
     } catch (error: any) {
       console.error(
@@ -403,5 +404,6 @@ async function handleProcessImages(request: any, tabId?: number) {
     );
   }
 
-  return { success: true, results };
+  const wasRateLimited = results.some((r) => r.wasRateLimited);
+  return { success: true, results, wasRateLimited };
 }
