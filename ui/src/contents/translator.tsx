@@ -117,13 +117,18 @@ const MangaTranslator = () => {
   );
 
   const processSingleImage = useCallback(
-    async (image: { id: string; element: HTMLImageElement; dataUrl: string }) => {
+    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean }> => {
       try {
         const response = await sendToBackground({
           action: "PROCESS_IMAGES",
           images: [{ id: image.id, dataUrl: image.dataUrl, bounds: { x: 0, y: 0, width: 0, height: 0 } }],
           settings: settingsRef.current,
         });
+
+        if (response?.isRateLimit) {
+          console.error("[TRANSLATOR] Rate limit hit:", response.error);
+          return { isRateLimit: true };
+        }
 
         if (response?.success && response.results?.length > 0) {
           const result = response.results[0];
@@ -137,14 +142,12 @@ const MangaTranslator = () => {
             console.log(`[TRANSLATOR] Overlay applied: ${result.textRegions.length} regions`);
           }
         } else if (!response?.success && response?.error) {
-          const err = new Error(response.error) as any;
-          err.isRateLimit = response.isRateLimit || false;
-          throw err;
+          console.error("[TRANSLATOR] Failed to process image:", response.error);
         }
       } catch (error: any) {
         console.error("[TRANSLATOR] Failed to process image:", error);
-        if (error.isRateLimit) throw error;
       }
+      return { isRateLimit: false };
     },
     [createOverlayContainer],
   );
@@ -199,7 +202,11 @@ const MangaTranslator = () => {
           continue;
         }
         const id = ImageDetector.generateImageId(el);
-        await processSingleImage({ id, element: el, dataUrl });
+        const { isRateLimit } = await processSingleImage({ id, element: el, dataUrl });
+        if (isRateLimit) {
+          notifyPopup({ action: "ERROR", error: "Gemini API rate limit reached. Please wait and try again.", isRateLimit: true });
+          return;
+        }
         el.setAttribute("data-panora-translated", "1");
         processed++;
         notifyPopup({ action: "PROGRESS_UPDATE", current: i + 1, total, status: i === imageElements.length - 1 ? "complete" : "processing" });
@@ -227,7 +234,7 @@ const MangaTranslator = () => {
         translationHandlerRef.current?.();
         return false;
       }
-      if (message.action === "STOP_TRANSLATION" || (message.action === "ERROR" && message.isRateLimit)) {
+      if (message.action === "STOP_TRANSLATION") {
         processingRef.current = false;
         document.querySelectorAll(".manga-translator-overlay-container").forEach((el) => el.remove());
         document.querySelectorAll("[data-panora-translated]").forEach((el) => el.removeAttribute("data-panora-translated"));
