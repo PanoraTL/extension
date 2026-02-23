@@ -1,8 +1,13 @@
 import base64
 import io
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
+
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("panora")
 
 import numpy as np
 import torch
@@ -34,7 +39,7 @@ async def lifespan(app: FastAPI):
         rtdetr_model.eval()
         model_loaded = True
     except Exception as e:
-        print(f"Failed to load model: {e}")
+        logger.error(f"Failed to load model: {e}")
         model_loaded = False
     yield
 
@@ -177,10 +182,11 @@ async def detect_bubbles(request: DetectRequest):
     labels = detections["labels"].tolist()
 
     label_names = {LABEL_BUBBLE: "bubble", LABEL_TEXT_BUBBLE: "text_bubble", LABEL_TEXT_FREE: "text_free"}
-    print(f"[DETECT] image={img_w}x{img_h}, detections={len(boxes)}")
-    for box, score, label in zip(boxes, scores, labels):
-        x1, y1, x2, y2 = box
-        print(f"  {label_names.get(label, label)} score={score:.2f} box=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}) pct=({x1/img_w*100:.1f}%,{y1/img_h*100:.1f}%,{(x2-x1)/img_w*100:.1f}%w,{(y2-y1)/img_h*100:.1f}%h)")
+    logger.info(f"[DETECT] image={img_w}x{img_h}, detections={len(boxes)}")
+    if logger.isEnabledFor(logging.DEBUG):
+        for box, score, label in zip(boxes, scores, labels):
+            x1, y1, x2, y2 = box
+            logger.debug(f"  {label_names.get(label, label)} score={score:.2f} box=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}) pct=({x1/img_w*100:.1f}%,{y1/img_h*100:.1f}%,{(x2-x1)/img_w*100:.1f}%w,{(y2-y1)/img_h*100:.1f}%h)")
 
     bubble_list = []
     text_bubble_list = []
