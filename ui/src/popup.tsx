@@ -715,7 +715,7 @@ function IndexPopup() {
                         type="button"
                         onClick={() => setShowApiKey((v) => !v)}
                         title={showApiKey ? "Hide key" : "Show key"}
-                        style={{ background: showApiKey ? "rgba(193,95,60,0.12)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
+                        style={{ background: showApiKey ? "rgba(193,95,60,0.12)" : "#fff", borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
                       >
                         {showApiKey ? (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -741,7 +741,7 @@ function IndexPopup() {
                           }
                         }}
                         title="Copy key"
-                        style={{ background: copied ? "rgba(76,175,80,0.1)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s, color 0.15s" }}
+                        style={{ background: copied ? "rgba(76,175,80,0.1)" : "#fff", borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s, color 0.15s" }}
                       >
                         {copied ? (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
