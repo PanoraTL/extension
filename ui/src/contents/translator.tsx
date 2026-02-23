@@ -116,42 +116,7 @@ const MangaTranslator = () => {
     [],
   );
 
-  const processSingleImage = useCallback(
-    async (image: { id: string; element: HTMLImageElement; dataUrl: string }): Promise<{ isRateLimit: boolean; success: boolean; wasRateLimited: boolean }> => {
-      try {
-        const response = await sendToBackground({
-          action: "PROCESS_IMAGES",
-          images: [{ id: image.id, dataUrl: image.dataUrl, bounds: { x: 0, y: 0, width: 0, height: 0 } }],
-          settings: settingsRef.current,
-        });
-
-        if (response?.isRateLimit) {
-          console.error("[TRANSLATOR] Rate limit hit:", response.error);
-          return { isRateLimit: true, success: false, wasRateLimited: false };
-        }
-
-        if (response?.success && response.results?.length > 0) {
-          const result = response.results[0];
-          if (result.textRegions && result.textRegions.length > 0) {
-            const container = createOverlayContainer(image.element, image.id);
-            setOverlays((prev) => {
-              const m = new Map(prev);
-              m.set(image.id, { element: image.element, textRegions: result.textRegions, container });
-              return m;
-            });
-            console.log(`[TRANSLATOR] Overlay applied: ${result.textRegions.length} regions`);
-          }
-          return { isRateLimit: false, success: true, wasRateLimited: response.wasRateLimited === true };
-        } else if (!response?.success && response?.error) {
-          console.error("[TRANSLATOR] Failed to process image:", response.error);
-        }
-      } catch (error: any) {
-        console.error("[TRANSLATOR] Failed to process image:", error);
-      }
-      return { isRateLimit: false, success: false, wasRateLimited: false };
-    },
-    [createOverlayContainer],
-  );
+  const pendingPanelsRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
   const handleAutoTranslation = useCallback(async () => {
     if (processingRef.current) return;
@@ -165,56 +130,79 @@ const MangaTranslator = () => {
 
       if (imageElements.length === 0) {
         notifyPopup({ action: "ERROR", error: allPanels.length > 0 ? "All panels on this page are already translated" : "No manga panel images found on this page" });
+        processingRef.current = false;
         return;
       }
 
-      const total = imageElements.length;
-      notifyPopup({ action: "PROGRESS_UPDATE", current: 0, total, status: "processing" });
+      const panelData = await Promise.allSettled(
+        imageElements.map(async (el) => {
+          const id = ImageDetector.generateImageId(el);
+          const dataUrl = await ImageDetector.toDataUrl(el);
+          return { id, dataUrl, element: el };
+        })
+      );
 
-      let processed = 0;
-      let anyRateLimited = false;
-      for (let i = 0; i < imageElements.length; i++) {
-        if (!processingRef.current) break;
-        const el = imageElements[i];
-        let dataUrl: string;
-        try {
-          dataUrl = await ImageDetector.toDataUrl(el);
-        } catch (error) {
-          console.warn("[TRANSLATOR] Failed to load image:", el.src.substring(0, 80), error);
-          notifyPopup({ action: "ERROR", error: "Failed to load image — it may be blocked by CORS or unavailable" });
-          continue;
-        }
-        const id = ImageDetector.generateImageId(el);
-        const { isRateLimit, success, wasRateLimited } = await processSingleImage({ id, element: el, dataUrl });
-        if (isRateLimit) {
-          notifyPopup({ action: "ERROR", error: "Gemini API rate limit reached. Please wait and try again.", isRateLimit: true });
-          return;
-        }
-        if (wasRateLimited) anyRateLimited = true;
-        if (success) {
-          el.setAttribute("data-panora-translated", "1");
-          processed++;
-        }
-        if (i < imageElements.length - 1) {
-          notifyPopup({ action: "PROGRESS_UPDATE", current: i + 1, total, status: "processing" });
-        }
+      const validPanels = panelData
+        .filter((r): r is PromiseFulfilledResult<{ id: string; dataUrl: string; element: HTMLImageElement }> => r.status === "fulfilled")
+        .map((r) => r.value);
+
+      if (validPanels.length === 0) {
+        notifyPopup({ action: "ERROR", error: "Failed to load any panel images." });
+        processingRef.current = false;
+        return;
       }
 
-      if (processed === 0) notifyPopup({ action: "ERROR", error: "Could not translate any panels. Check your API key and try again." });
-      else if (anyRateLimited) notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed slowly via fallback model.", isRateLimit: true });
-      else notifyPopup({ action: "PROGRESS_UPDATE", current: total, total, status: "complete" });
+      pendingPanelsRef.current = new Map(validPanels.map((p) => [p.id, p.element]));
+
+      const total = validPanels.length;
+      notifyPopup({ action: "PROGRESS_UPDATE", current: 0, total, status: "processing" });
+
+      try {
+        chrome.runtime.sendMessage({
+          action: "PROCESS_IMAGES_BATCH",
+          images: validPanels.map((p) => ({ id: p.id, dataUrl: p.dataUrl })),
+          settings: settingsRef.current,
+        }, () => { void chrome.runtime.lastError; });
+      } catch (err) {
+        console.error("[TRANSLATOR] Failed to send batch message:", err);
+        notifyPopup({ action: "ERROR", error: "Failed to start translation." });
+        processingRef.current = false;
+      }
     } catch (error: any) {
       notifyPopup({ action: "ERROR", error: error.message || "Translation failed" });
-    } finally {
       processingRef.current = false;
     }
-  }, [processSingleImage]);
+  }, [createOverlayContainer]);
 
   useEffect(() => { translationHandlerRef.current = handleAutoTranslation; }, [handleAutoTranslation]);
   useEffect(() => { processingRef.current = false; }, []);
 
   useEffect(() => {
     const handleMessage = (message: any, _: chrome.runtime.MessageSender, sendResponse: (r?: any) => void) => {
+      if (message.action === "PANEL_RESULT") {
+        const el = pendingPanelsRef.current.get(message.imageId);
+        if (el && message.textRegions?.length > 0) {
+          const container = createOverlayContainer(el, message.imageId);
+          setOverlays((prev) => {
+            const m = new Map(prev);
+            m.set(message.imageId, { element: el, textRegions: message.textRegions, container });
+            return m;
+          });
+          el.setAttribute("data-panora-translated", "1");
+        }
+        return false;
+      }
+      if (message.action === "BATCH_COMPLETE") {
+        processingRef.current = false;
+        if (!message.success) {
+          notifyPopup({ action: "ERROR", error: message.error, isRateLimit: message.isRateLimit });
+        } else if (message.wasRateLimited) {
+          notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed via fallback model.", isRateLimit: true });
+        } else {
+          notifyPopup({ action: "PROGRESS_UPDATE", current: message.total, total: message.total, status: "complete" });
+        }
+        return false;
+      }
       if (message.action === "START_TRANSLATION") {
         if (message.settings) {
           settingsRef.current = message.settings;

@@ -15,7 +15,7 @@ chrome.runtime.onInstalled.addListener(() => {
 class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
-  private concurrent = 3;
+  private concurrent = 5;
   private active = 0;
 
   async add<T>(fn: () => Promise<T>): Promise<T> {
@@ -124,6 +124,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true;
+  }
+
+  if (request.action === "PROCESS_IMAGES_BATCH") {
+    const tabId = sender.tab?.id;
+    sendResponse({ success: true });
+    handleProcessImagesBatch(request, tabId);
+    return false;
   }
 
   if (request.action === "UPDATE_API_KEY") {
@@ -308,8 +315,6 @@ async function handleProcessImages(request: any, tabId?: number) {
       let textRegions = await cache.get(imageHash, settings.targetLanguage);
 
       if (!textRegions) {
-        console.log(`[BACKGROUND] Cache miss for ${image.id}, calling API`);
-
         textRegions = await requestQueue.add(async () => {
           if (!geminiService.isInitialized()) {
             throw new Error(
@@ -329,10 +334,9 @@ async function handleProcessImages(request: any, tabId?: number) {
               return regions;
             } catch (yoloError: any) {
               yoloConsecutiveFailures++;
-              console.warn(`[BACKGROUND] YOLO failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
+              console.warn(`[BACKGROUND] RT-DETR failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
               if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
                 pythonServerAvailable = false;
-                console.warn(`[BACKGROUND] YOLO disabled after ${YOLO_MAX_FAILURES} consecutive failures`);
               }
             }
           }
@@ -411,4 +415,93 @@ async function handleProcessImages(request: any, tabId?: number) {
 
   const wasRateLimited = results.some((r) => r.wasRateLimited);
   return { success: true, results, wasRateLimited };
+}
+
+async function processSinglePanel(
+  image: { id: string; dataUrl: string },
+  settings: any,
+): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; error: string | null }> {
+  await initPromise;
+  const imageHash = await TranslationCache.hashImage(image.dataUrl);
+  const cached = await cache.get(imageHash, settings.targetLanguage);
+  if (cached) {
+    console.log(`[BACKGROUND] Cache hit for ${image.id}`);
+    return { textRegions: cached, wasRateLimited: false, error: null };
+  }
+
+  try {
+    const textRegions = await requestQueue.add(async () => {
+      if (!geminiService.isInitialized()) {
+        throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
+      }
+      const useYolo = await checkPythonServer();
+      if (useYolo) {
+        try {
+          const regions = await detectBubblesViaPython(image.dataUrl, settings.targetLanguage);
+          yoloConsecutiveFailures = 0;
+          return regions;
+        } catch (yoloError: any) {
+          yoloConsecutiveFailures++;
+          console.warn(`[BACKGROUND] RT-DETR failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
+          if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
+            pythonServerAvailable = false;
+          }
+        }
+      }
+      return await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
+    });
+    await cache.set(imageHash, settings.targetLanguage, textRegions);
+    return { textRegions: textRegions || [], wasRateLimited: geminiService.lastCallWasRateLimited, error: null };
+  } catch (error: any) {
+    if (error.isRateLimit || geminiService.isRateLimit(error)) {
+      return { textRegions: [], wasRateLimited: false, error: error.message, };
+    }
+    return { textRegions: [], wasRateLimited: false, error: error.message || "Processing failed" };
+  }
+}
+
+async function handleProcessImagesBatch(request: any, tabId?: number) {
+  const { images, settings } = request;
+  const total = images.length;
+  let completed = 0;
+  let anyRateLimited = false;
+  let anySuccess = false;
+  let rateLimitHit = false;
+
+  console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
+
+  const sendToTab = (msg: any) => {
+    if (tabId) chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+  };
+  const sendToPopup = (msg: any) => {
+    chrome.runtime.sendMessage(msg).catch(() => {});
+  };
+
+  await Promise.allSettled(
+    images.map(async (image: { id: string; dataUrl: string }) => {
+      const result = await processSinglePanel(image, settings);
+      completed++;
+
+      if (result.error && (result.error.includes("rate limit") || result.error.includes("Rate limit"))) {
+        rateLimitHit = true;
+        sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
+      } else {
+        if (result.textRegions.length > 0) anySuccess = true;
+        if (result.wasRateLimited) anyRateLimited = true;
+        sendToTab({ action: "PANEL_RESULT", imageId: image.id, textRegions: result.textRegions, wasRateLimited: result.wasRateLimited });
+      }
+
+      sendToPopup({ action: "PROGRESS_UPDATE", current: completed, total, status: "processing" });
+    })
+  );
+
+  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels processed`);
+
+  if (rateLimitHit) {
+    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });
+  } else if (!anySuccess) {
+    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again." });
+  } else {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed });
+  }
 }
