@@ -54,6 +54,16 @@ const FEATURES = [
 function IndexPopup() {
   const { data: session, isPending: authLoading } = authClient.useSession();
 
+  const showErrorToast = (title: string, description?: string) => {
+    toast.custom((t) => (
+      <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #C15F3C", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
+        <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#C15F3C", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "#C15F3C" }}>{title}</div>
+        {description && <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{description}</div>}
+      </div>
+    ), { duration: 6000 });
+  };
+
   const [status, setStatus] = useState<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [showSettings, setShowSettings] = useState(false);
@@ -101,15 +111,18 @@ function IndexPopup() {
         const newStatus = message.status || "processing";
         setStatus(newStatus);
         if (newStatus === "complete") {
-          toast.success("Translation complete!", {
-            description: `${message.total} panel${message.total !== 1 ? "s" : ""} translated`,
-            duration: 4000,
-          });
+          toast.custom((t) => (
+            <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #4CAF50", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
+              <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#4CAF50", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "#4CAF50" }}>Translation complete!</div>
+              <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{message.total} panel{message.total !== 1 ? "s" : ""} translated</div>
+            </div>
+          ), { duration: 4000 });
           setStatus("idle");
           setProgress({ current: 0, total: 0 });
         }
       } else if (message.action === "ERROR") {
-        toast.error(message.error || "Translation failed", { duration: 6000 });
+        showErrorToast("Translation failed", message.error || undefined);
         setStatus("idle");
         setProgress({ current: 0, total: 0 });
       }
@@ -133,7 +146,7 @@ function IndexPopup() {
 
   const handleStartTranslation = async () => {
     if (!apiKey.trim()) {
-      toast.error("No Gemini API key set. Add your key in Settings.");
+      showErrorToast("No API key set", "Add your Gemini API key in Settings.");
       return;
     }
     setProgress({ current: 0, total: 0 });
@@ -144,7 +157,7 @@ function IndexPopup() {
         currentWindow: true,
       });
       if (!tab.id) {
-        toast.error("No active tab found");
+        showErrorToast("No active tab found");
         setStatus("idle");
         return;
       }
@@ -153,13 +166,13 @@ function IndexPopup() {
         { action: "START_TRANSLATION", mode: "auto", settings: savedSettings },
         () => {
           if (chrome.runtime.lastError) {
-            toast.error(chrome.runtime.lastError.message || "Unexpected error");
+            showErrorToast("Unexpected error", chrome.runtime.lastError.message);
             setStatus("idle");
           }
         },
       );
     } catch (err: any) {
-      toast.error(err.message || "Failed to start translation");
+      showErrorToast("Failed to start translation", err.message);
       setStatus("idle");
     }
   };
@@ -235,20 +248,7 @@ function IndexPopup() {
 
   return (
     <>
-    <Toaster
-      position="top-center"
-      toastOptions={{
-        style: {
-          fontFamily: "'Inter', sans-serif",
-          fontSize: "13px",
-          borderRadius: "10px",
-        },
-        classNames: {
-          success: "!border-[#4CAF50] !bg-white",
-          error: "!border-[#C15F3C] !bg-white",
-        },
-      }}
-    />
+    <Toaster position="top-center" />
     <div
       style={{
         width: "400px",
