@@ -125,13 +125,11 @@ const getFontFamily = (style?: string): string => {
         const fontFamily = getFontFamily(region.detectedFontStyle);
         const fontWeight = region.detectedFontStyle === "bold" ? "bold" : "600";
 
-        const isFreeText = region.bubbleType === "text_free";
-
         const maskW = visW;
         const maskH = visH;
         const left = visX;
         const top = visY;
-        const borderRadius = isFreeText ? "2px" : "4px";
+        const borderRadius = "4px";
 
         const boxWPx = (maskW / 100) * imgW;
         const boxHPx = (maskH / 100) * imgH;
@@ -149,7 +147,7 @@ const getFontFamily = (style?: string): string => {
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
-              backgroundColor: isFreeText ? "transparent" : "#FFFFFF",
+              backgroundColor: "#FFFFFF",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -161,10 +159,8 @@ const getFontFamily = (style?: string): string => {
                 fontFamily,
                 fontSize: `${fontSize}px`,
                 fontWeight,
-                color: isFreeText ? "#FFFFFF" : "#111111",
-                textShadow: isFreeText
-                  ? "0 0 3px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000"
-                  : "none",
+                color: "#111111",
+                textShadow: "none",
                 textAlign: "center",
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
