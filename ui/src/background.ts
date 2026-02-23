@@ -511,8 +511,9 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   );
 
   const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
-  const totalTokens = geminiService.totalTokensUsed;
-  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | ~${totalTokens} tokens used`);
+  const inputTokens = geminiService.totalInputTokens;
+  const outputTokens = geminiService.totalOutputTokens;
+  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | tokens — input: ${inputTokens}, output: ${outputTokens}, total: ${inputTokens + outputTokens}`);
   geminiService.resetTokenCount();
 
   if (batchAborted && !rateLimitHit) {

@@ -10,7 +10,8 @@ export class GeminiService {
   private fallbackModel: any = null;
   private usingFallback = false;
   public lastCallWasRateLimited = false;
-  public totalTokensUsed = 0;
+  public totalInputTokens = 0;
+  public totalOutputTokens = 0;
 
   constructor(apiKey?: string) {
     if (apiKey) {
@@ -35,7 +36,8 @@ export class GeminiService {
   }
 
   resetTokenCount() {
-    this.totalTokensUsed = 0;
+    this.totalInputTokens = 0;
+    this.totalOutputTokens = 0;
   }
 
   clear() {
@@ -204,8 +206,10 @@ export class GeminiService {
   }
 
   private accumulateTokens(result: any) {
-    const tokens = result?.response?.usageMetadata?.totalTokenCount;
-    if (typeof tokens === "number") this.totalTokensUsed += tokens;
+    const usage = result?.response?.usageMetadata;
+    if (!usage) return;
+    if (typeof usage.promptTokenCount === "number") this.totalInputTokens += usage.promptTokenCount;
+    if (typeof usage.candidatesTokenCount === "number") this.totalOutputTokens += usage.candidatesTokenCount;
   }
 
   private async retryWithBackoff<T>(
