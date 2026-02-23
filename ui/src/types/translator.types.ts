@@ -172,7 +172,7 @@ export type TranslatorAction =
   | { type: "TOGGLE_OVERLAYS"; show: boolean }
   | { type: "RESET" };
 
-export interface YoloBubble {
+export interface DetectedBubble {
   bounds: BoundingBox;
   cropDataUrl: string;
   background: BackgroundInfo;

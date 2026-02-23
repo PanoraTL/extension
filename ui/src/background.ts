@@ -1,12 +1,12 @@
 import { geminiService } from "~/api/services";
-import type { TextRegion, YoloBubble } from "~/types/translator.types";
+import type { TextRegion, DetectedBubble } from "~/types/translator.types";
 
-const PYTHON_SERVER_URL = "http://localhost:5001";
-let pythonServerAvailable: boolean | null = null;
+const MODEL_SERVER_URL = "http://localhost:5001";
+let modelAvailable: boolean | null = null;
 let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 30000;
-let yoloConsecutiveFailures = 0;
-const YOLO_MAX_FAILURES = 3;
+let detectorConsecutiveFailures = 0;
+const DETECTOR_MAX_FAILURES = 3;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
@@ -173,42 +173,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
-async function checkPythonServer(): Promise<boolean> {
+async function checkModel(): Promise<boolean> {
   const now = Date.now();
-  if (pythonServerAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
-    return pythonServerAvailable;
+  if (modelAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
+    return modelAvailable;
   }
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${PYTHON_SERVER_URL}/health`, { signal: controller.signal });
+    const resp = await fetch(`${MODEL_SERVER_URL}/health`, { signal: controller.signal });
     clearTimeout(timeout);
     if (resp.ok) {
       const data = await resp.json();
-      pythonServerAvailable = data.model_loaded === true;
-      if (pythonServerAvailable) yoloConsecutiveFailures = 0;
+      modelAvailable = data.model_loaded === true;
+      if (modelAvailable) detectorConsecutiveFailures = 0;
     } else {
-      pythonServerAvailable = false;
+      modelAvailable = false;
     }
   } catch {
-    pythonServerAvailable = false;
+    modelAvailable = false;
   }
   lastHealthCheck = Date.now();
-  console.log(`[BACKGROUND] Python server available: ${pythonServerAvailable}`);
-  return pythonServerAvailable;
+  console.log(`[BACKGROUND] Model available: ${modelAvailable}`);
+  return modelAvailable;
 }
 
-async function detectBubblesViaPython(
+async function detectBubblesViaModel(
   imageDataUrl: string,
   targetLang: string,
 ): Promise<TextRegion[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
 
-  let bubbles: YoloBubble[];
+  let bubbles: DetectedBubble[];
 
   try {
-    const response = await fetch(`${PYTHON_SERVER_URL}/detect-bubbles`, {
+    const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json" },
@@ -216,7 +216,7 @@ async function detectBubblesViaPython(
     });
 
     if (!response.ok) {
-      throw new Error(`Python server returned ${response.status}`);
+      throw new Error(`Model server returned ${response.status}`);
     }
 
     const data = await response.json();
@@ -322,21 +322,21 @@ async function handleProcessImages(request: any, tabId?: number) {
             );
           }
 
-          const useYolo = await checkPythonServer();
+          const useDetector = await checkModel();
 
-          if (useYolo) {
+          if (useDetector) {
             try {
-              const regions = await detectBubblesViaPython(
+              const regions = await detectBubblesViaModel(
                 image.dataUrl,
                 settings.targetLanguage,
               );
-              yoloConsecutiveFailures = 0;
+              detectorConsecutiveFailures = 0;
               return regions;
-            } catch (yoloError: any) {
-              yoloConsecutiveFailures++;
-              console.warn(`[BACKGROUND] RT-DETR failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
-              if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
-                pythonServerAvailable = false;
+            } catch (detectorError: any) {
+              detectorConsecutiveFailures++;
+              console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
+              if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
+                modelAvailable = false;
               }
             }
           }
@@ -434,17 +434,17 @@ async function processSinglePanel(
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
-      const useYolo = await checkPythonServer();
-      if (useYolo) {
+      const useDetector = await checkModel();
+      if (useDetector) {
         try {
-          const regions = await detectBubblesViaPython(image.dataUrl, settings.targetLanguage);
-          yoloConsecutiveFailures = 0;
+          const regions = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
+          detectorConsecutiveFailures = 0;
           return regions;
-        } catch (yoloError: any) {
-          yoloConsecutiveFailures++;
-          console.warn(`[BACKGROUND] RT-DETR failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
-          if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
-            pythonServerAvailable = false;
+        } catch (detectorError: any) {
+          detectorConsecutiveFailures++;
+          console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
+          if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
+            modelAvailable = false;
           }
         }
       }
