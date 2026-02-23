@@ -213,10 +213,6 @@ const MangaTranslator = () => {
       }
       if (message.action === "STOP_TRANSLATION") {
         processingRef.current = false;
-        document.querySelectorAll(".manga-translator-overlay-container").forEach((el) => el.remove());
-        document.querySelectorAll("[data-panora-translated]").forEach((el) => el.removeAttribute("data-panora-translated"));
-        setOverlays(new Map());
-        ImageDetector.resetCounter();
         sendResponse({ success: true });
         return false;
       }

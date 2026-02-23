@@ -133,7 +133,7 @@ const getFontFamily = (style?: string): string => {
 
         const boxWPx = (maskW / 100) * imgW;
         const boxHPx = (maskH / 100) * imgH;
-        const fontSize = Math.max(12, Math.min(boxHPx * 0.28, boxWPx * 0.09, 18));
+        const fontSize = Math.max(14, Math.min(boxHPx * 0.28, boxWPx * 0.09, 18));
 
         return (
           <div

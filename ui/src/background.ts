@@ -7,6 +7,7 @@ let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 30000;
 let detectorConsecutiveFailures = 0;
 const DETECTOR_MAX_FAILURES = 3;
+let batchAborted = false;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
@@ -127,9 +128,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "PROCESS_IMAGES_BATCH") {
+    batchAborted = false;
     const tabId = sender.tab?.id;
     sendResponse({ success: true });
     handleProcessImagesBatch(request, tabId);
+    return false;
+  }
+
+  if (request.action === "STOP_TRANSLATION") {
+    batchAborted = true;
+    sendResponse({ success: true });
     return false;
   }
 
@@ -467,6 +475,7 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   let anyRateLimited = false;
   let anySuccess = false;
   let rateLimitHit = false;
+  const startTime = Date.now();
 
   console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
 
@@ -479,11 +488,17 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   await Promise.allSettled(
     images.map(async (image: { id: string; dataUrl: string }) => {
+      if (batchAborted) return;
+
       const result = await processSinglePanel(image, settings);
+
+      if (batchAborted) return;
+
       completed++;
 
-      if (result.error && (result.error.includes("rate limit") || result.error.includes("Rate limit"))) {
+      if (result.error && (result.error.toLowerCase().includes("rate limit") || result.error.toLowerCase().includes("quota"))) {
         rateLimitHit = true;
+        batchAborted = true;
         sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
       } else {
         if (result.textRegions.length > 0) anySuccess = true;
@@ -495,9 +510,14 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     })
   );
 
-  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels processed`);
+  const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+  const totalTokens = geminiService.totalTokensUsed;
+  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | ~${totalTokens} tokens used`);
+  geminiService.resetTokenCount();
 
-  if (rateLimitHit) {
+  if (batchAborted && !rateLimitHit) {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true });
+  } else if (rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });
   } else if (!anySuccess) {
     sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again." });

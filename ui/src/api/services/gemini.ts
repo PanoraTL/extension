@@ -10,6 +10,7 @@ export class GeminiService {
   private fallbackModel: any = null;
   private usingFallback = false;
   public lastCallWasRateLimited = false;
+  public totalTokensUsed = 0;
 
   constructor(apiKey?: string) {
     if (apiKey) {
@@ -31,6 +32,10 @@ export class GeminiService {
   private switchToFallback() {
     console.log(`[API] Rate limit hit on ${PRIMARY_MODEL}, switching to ${FALLBACK_MODEL}`);
     this.usingFallback = true;
+  }
+
+  resetTokenCount() {
+    this.totalTokensUsed = 0;
   }
 
   clear() {
@@ -198,6 +203,11 @@ export class GeminiService {
     return error.message || "Unknown Gemini API error";
   }
 
+  private accumulateTokens(result: any) {
+    const tokens = result?.response?.usageMetadata?.totalTokenCount;
+    if (typeof tokens === "number") this.totalTokensUsed += tokens;
+  }
+
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
   ): Promise<T> {
@@ -316,6 +326,7 @@ If no text is found, return: []`;
       };
 
       const result = await this.getActiveModel().generateContent([prompt, imagePart]);
+      this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
 
@@ -383,6 +394,7 @@ If no text is found, return: []`;
       };
 
       const result = await this.getActiveModel().generateContent([prompt, imagePart]);
+      this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
 
@@ -429,6 +441,7 @@ If no text is found, return: []`;
       }
 
       const result = await this.getActiveModel().generateContent(parts);
+      this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
 
