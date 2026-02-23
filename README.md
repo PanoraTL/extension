@@ -3,23 +3,23 @@
   <h1>Panora</h1>
 </div>
 
-Panora is a Chrome extension that translates manga speech bubbles in real time directly in your browser. It detects speech bubbles on any manga reading website, runs OCR on each bubble, and overlays the translated text with minimal visual disruption to the original artwork.
+Panora is a Chrome extension that translates manga speech bubbles in real time directly in your browser. It detects speech bubbles and floating text on any manga reading website, runs OCR on each region, and overlays the translated text with minimal visual disruption to the original artwork.
 
 ---
 
 ## Features
 
-**Speech Bubble Detection**
-A locally running YOLOv8 segmentation model detects speech bubbles with high spatial accuracy, returning precise bounding boxes for each bubble in the panel.
+**Speech Bubble and Floating Text Detection**
+A locally running RT-DETR-v2 model detects three classes of text regions: outer bubble shells (`bubble`), inner text areas (`text_bubble`), and free-floating text outside bubbles (`text_free` — SFX, narration boxes, titles). Bounding boxes are accurate even for irregular shapes.
 
-**Per-Bubble OCR and Translation**
-Each detected bubble crop is sent to Gemini 2.5 Flash for text extraction and translation. The primary model falls back to Gemini 2.5 Flash Lite automatically when rate limits are hit.
+**Per-Region OCR and Translation**
+Each detected region crop is sent to Gemini 2.5 Flash for text extraction and translation. The primary model falls back to Gemini 2.5 Flash Lite automatically when rate limits are hit.
 
 **Gemini Fallback Detection**
-If the local YOLO server is unavailable, the extension falls back to Gemini-based full-image detection and translation, ensuring the extension works without any local server running.
+If the local detection server is unavailable, the extension falls back to Gemini-based full-image detection and translation, ensuring the extension works without any local server running.
 
 **Overlay Rendering**
-Translated text is rendered as positioned overlays directly on top of the manga image. The overlay system accounts for object-fit, partial bubbles at image edges, bubble type (speech, narration, tall), and font size estimation.
+Translated text is rendered as positioned overlays directly on top of the manga image. The overlay system accounts for object-fit, partial bubbles at image edges, bubble type (speech, narration, tall, text_free), and font size estimation.
 
 **Partial Bubble Handling**
 Speech bubbles that are cut off at the top or bottom of an image are detected and handled with custom positioning logic that anchors the overlay to the correct visible edge.
@@ -38,8 +38,8 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 ## Tech Stack
 
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
-- **Detection Model**: YOLOv8 segmentation (`kitsumed/yolov8m_seg-speech-bubble`)
-- **Detection Server**: Python 3 + FastAPI + Ultralytics
+- **Detection Model**: RT-DETR-v2 r50vd (`ogkalu/comic-text-and-bubble-detector`) — 3 classes: bubble, text_bubble, text_free
+- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm
 - **Translation / OCR**: Google Gemini 2.5 Flash (primary), Gemini 2.5 Flash Lite (fallback)
 - **Auth**: Better Auth + Convex
 - **Build**: Plasmo bundler
@@ -52,7 +52,7 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 extension/
 ├── ui/            Chrome extension source (Plasmo + React + TypeScript)
 │   └── auth/      Convex auth backend (TypeScript)
-└── server/        Local YOLO detection server (Python + FastAPI)
+└── server/        Local RT-DETR-v2 detection server (Python + FastAPI)
 ```
 
 ---
@@ -74,11 +74,19 @@ The key is saved in `chrome.storage.local` and persists across sessions. No envi
 
 Only one environment variable is needed, for the auth backend:
 
+**Extension (`ui/`)**
+
 | Variable | Description |
 |---|---|
 | `PLASMO_PUBLIC_AUTH_SERVER_URL` | URL of the Better Auth + Convex auth server. Defaults to `http://localhost:3000`. |
 
 Copy `ui/.env.example` to `ui/.env.local` and set this if running your own auth server.
+
+**Server (`server/`)**
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | Python log level. Set to `DEBUG` to enable per-detection-box logs. |
 
 ---
 
@@ -94,7 +102,7 @@ Copy `ui/.env.example` to `ui/.env.local` and set this if running your own auth 
 
 ### One-command setup
 
-From the `extension/` directory, a single script starts all services — the YOLO detection server, the Convex backend, and the Plasmo extension:
+From the `extension/` directory, a single script starts all services — the RT-DETR-v2 detection server, the Convex backend, and the Plasmo extension:
 
 ```bash
 ./dev.sh
@@ -102,7 +110,7 @@ From the `extension/` directory, a single script starts all services — the YOL
 
 This will:
 1. Create a Python virtual environment and install dependencies (first run only)
-2. Start the YOLO server on `http://127.0.0.1:5001`
+2. Start the detection server on `http://127.0.0.1:5001`
 3. Start the Plasmo extension dev build and Convex backend
 4. Watch for Plasmo rebuilds and re-apply the correct extension icons automatically
 
@@ -118,7 +126,7 @@ Press `Ctrl+C` to stop all services.
 
 ### Server
 
-The local detection server runs a YOLOv8 model that detects speech bubble locations. It downloads the model weights on first run (~52 MB).
+The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB).
 
 ```bash
 cd server
