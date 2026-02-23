@@ -157,6 +157,7 @@ function IndexPopup() {
       return;
     }
     setProgress({ current: 0, total: 0 });
+    statusRef.current = "processing";
     setStatus("processing");
     try {
       const [tab] = await chrome.tabs.query({
@@ -165,6 +166,7 @@ function IndexPopup() {
       });
       if (!tab.id) {
         showErrorToast("No active tab found");
+        statusRef.current = "idle";
         setStatus("idle");
         return;
       }
@@ -174,12 +176,14 @@ function IndexPopup() {
         () => {
           if (chrome.runtime.lastError) {
             showErrorToast("Unexpected error", chrome.runtime.lastError.message);
+            statusRef.current = "idle";
             setStatus("idle");
           }
         },
       );
     } catch (err: any) {
       showErrorToast("Failed to start translation", err.message);
+      statusRef.current = "idle";
       setStatus("idle");
     }
   };
@@ -196,6 +200,7 @@ function IndexPopup() {
           console.error("Stop translation error:", chrome.runtime.lastError);
         }
       });
+      statusRef.current = "idle";
       setStatus("idle");
       setProgress({ current: 0, total: 0 });
     } catch (err) {
