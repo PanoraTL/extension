@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Toaster, toast } from "sonner";
 import "~/style.css";
 import logoSrc from "~/assets/orangesquare.png";
 import type {
@@ -55,7 +56,6 @@ function IndexPopup() {
 
   const [status, setStatus] = useState<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<TranslationSettings>({
     autoDetectLanguage: true,
@@ -98,10 +98,20 @@ function IndexPopup() {
     const handleMessage = (message: any) => {
       if (message.action === "PROGRESS_UPDATE") {
         setProgress({ current: message.current, total: message.total });
-        setStatus(message.status || "processing");
+        const newStatus = message.status || "processing";
+        setStatus(newStatus);
+        if (newStatus === "complete") {
+          toast.success("Translation complete!", {
+            description: `${message.total} panel${message.total !== 1 ? "s" : ""} translated`,
+            duration: 4000,
+          });
+          setStatus("idle");
+          setProgress({ current: 0, total: 0 });
+        }
       } else if (message.action === "ERROR") {
-        setError(message.error);
-        setStatus("error");
+        toast.error(message.error || "Translation failed", { duration: 6000 });
+        setStatus("idle");
+        setProgress({ current: 0, total: 0 });
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -123,11 +133,9 @@ function IndexPopup() {
 
   const handleStartTranslation = async () => {
     if (!apiKey.trim()) {
-      setError("No Gemini API key set. Add your key in Settings.");
-      setStatus("error");
+      toast.error("No Gemini API key set. Add your key in Settings.");
       return;
     }
-    setError(null);
     setProgress({ current: 0, total: 0 });
     setStatus("processing");
     try {
@@ -136,8 +144,8 @@ function IndexPopup() {
         currentWindow: true,
       });
       if (!tab.id) {
-        setError("No active tab found");
-        setStatus("error");
+        toast.error("No active tab found");
+        setStatus("idle");
         return;
       }
       chrome.tabs.sendMessage(
@@ -145,14 +153,14 @@ function IndexPopup() {
         { action: "START_TRANSLATION", mode: "auto", settings: savedSettings },
         () => {
           if (chrome.runtime.lastError) {
-            setError(chrome.runtime.lastError.message || "Unexpected error");
-            setStatus("error");
+            toast.error(chrome.runtime.lastError.message || "Unexpected error");
+            setStatus("idle");
           }
         },
       );
     } catch (err: any) {
-      setError(err.message || "Failed to start translation");
-      setStatus("error");
+      toast.error(err.message || "Failed to start translation");
+      setStatus("idle");
     }
   };
 
@@ -226,6 +234,21 @@ function IndexPopup() {
   }
 
   return (
+    <>
+    <Toaster
+      position="top-center"
+      toastOptions={{
+        style: {
+          fontFamily: "'Inter', sans-serif",
+          fontSize: "13px",
+          borderRadius: "10px",
+        },
+        classNames: {
+          success: "!border-[#4CAF50] !bg-white",
+          error: "!border-[#C15F3C] !bg-white",
+        },
+      }}
+    />
     <div
       style={{
         width: "400px",
@@ -1367,53 +1390,9 @@ function IndexPopup() {
           </div>
         )}
 
-        
-        {status !== "idle" && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "8px 12px",
-              borderRadius: "8px",
-              background:
-                status === "error"
-                  ? "rgba(193, 95, 60, 0.08)"
-                  : status === "complete"
-                    ? "rgba(76, 175, 80, 0.08)"
-                    : "transparent",
-            }}
-          >
-            {status === "processing" && (
-              <span style={{ fontSize: "12px", color: "#D4775A" }}>
-                <span
-                  style={{
-                    display: "inline-block",
-                    animation: "spin 1s linear infinite",
-                    marginRight: "6px",
-                  }}
-                >
-                  ⟳
-                </span>
-                Translating manga panels...
-              </span>
-            )}
-            {status === "complete" && (
-              <span
-                style={{ fontSize: "12px", color: "#4CAF50", fontWeight: 500 }}
-              >
-                Translation complete!
-              </span>
-            )}
-            {status === "error" && error && (
-              <span
-                style={{ fontSize: "12px", color: "#C15F3C", fontWeight: 500 }}
-              >
-                {error}
-              </span>
-            )}
-          </div>
-        )}
       </div>
     </div>
+    </>
   );
 }
 
