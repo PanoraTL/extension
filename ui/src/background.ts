@@ -373,11 +373,6 @@ async function handleProcessImages(request: any, tabId?: number) {
             isRateLimit: true,
           }).catch(() => {});
         }
-        chrome.runtime.sendMessage({
-          action: "ERROR",
-          error: rateLimitMsg,
-          isRateLimit: true,
-        }).catch(() => {});
         throw Object.assign(new Error(rateLimitMsg), { isRateLimit: true });
       }
 
