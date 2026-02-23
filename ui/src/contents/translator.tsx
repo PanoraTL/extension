@@ -160,30 +160,11 @@ const MangaTranslator = () => {
     try { await sendToBackground({ action: "CLEAR_CACHE" }); } catch (err) { console.warn("[TRANSLATOR] Failed to clear cache:", err); }
 
     try {
-      const visiblePanels = ImageDetector.findImages().filter((el) => {
-        if (!ImageDetector.isMangaPanel(el)) return false;
-        const rect = el.getBoundingClientRect();
-        return rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0;
-      });
-
-      const unprocessed = visiblePanels.filter((el) => !el.getAttribute("data-panora-translated"));
-
-      const best = unprocessed.reduce<HTMLImageElement | null>((top, el) => {
-        const r = el.getBoundingClientRect();
-        const visW = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
-        const visH = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
-        const area = visW * visH;
-        if (!top) return el;
-        const tr = top.getBoundingClientRect();
-        const tvW = Math.min(tr.right, window.innerWidth) - Math.max(tr.left, 0);
-        const tvH = Math.min(tr.bottom, window.innerHeight) - Math.max(tr.top, 0);
-        return area > tvW * tvH ? el : top;
-      }, null);
-
-      const imageElements = best ? [best] : [];
+      const allPanels = ImageDetector.findImages().filter((el) => ImageDetector.isMangaPanel(el));
+      const imageElements = allPanels.filter((el) => !el.getAttribute("data-panora-translated"));
 
       if (imageElements.length === 0) {
-        notifyPopup({ action: "ERROR", error: visiblePanels.length > 0 ? "Current panel already translated" : "No manga panel images found on this page" });
+        notifyPopup({ action: "ERROR", error: allPanels.length > 0 ? "All panels on this page are already translated" : "No manga panel images found on this page" });
         return;
       }
 

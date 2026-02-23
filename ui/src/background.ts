@@ -223,6 +223,7 @@ async function detectBubblesViaPython(
   const translations = validBubbles.length > 0
     ? await geminiService.extractAndTranslateFromCrops(
         validBubbles.map((b) => b.cropDataUrl),
+        validBubbles.map((b) => b.bubbleType ?? "speech"),
         targetLang,
       )
     : [];

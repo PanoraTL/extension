@@ -404,16 +404,24 @@ If no text is found, return: []`;
     });
   }
 
-  async extractAndTranslateFromCrops(
+  private async extractAndTranslateChunk(
     cropDataUrls: string[],
-    targetLang: string = "en",
+    bubbleTypes: string[],
+    targetLang: string,
   ): Promise<Array<{ originalText: string; translatedText: string }>> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
     return this.retryWithBackoff(async () => {
-      const prompt = `You are given ${cropDataUrls.length} speech bubble image(s), provided in order. For each image extract all text and translate it to ${targetLang}. Return ONLY a valid JSON array with exactly ${cropDataUrls.length} objects in the same order as the images. Each object must have exactly two fields: "originalText" and "translatedText". If an image has no text, use empty strings. Example format: [{"originalText":"...","translatedText":"..."},{"originalText":"","translatedText":""}]`;
+      const imageDescriptions = cropDataUrls
+        .map((_, i) => `[Image ${i + 1} - ${bubbleTypes[i] ?? "speech"}]`)
+        .join(", ");
+
+      const prompt =
+        `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
+        `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
+        `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
+        `For each image extract all text and translate it to ${targetLang}. ` +
+        `Return ONLY a valid JSON array with exactly ${cropDataUrls.length} objects in the same order as the images. ` +
+        `Each object must have exactly two fields: "originalText" and "translatedText". If an image has no text, use empty strings. ` +
+        `Example: [{"originalText":"...","translatedText":"..."},{"originalText":"","translatedText":""}]`;
 
       const parts: any[] = [prompt];
       for (const dataUrl of cropDataUrls) {
@@ -442,6 +450,30 @@ If no text is found, return: []`;
 
       return cropDataUrls.map(() => ({ originalText: "", translatedText: "" }));
     });
+  }
+
+  async extractAndTranslateFromCrops(
+    cropDataUrls: string[],
+    bubbleTypes: string[],
+    targetLang: string = "en",
+  ): Promise<Array<{ originalText: string; translatedText: string }>> {
+    if (!this.model) {
+      throw new Error("Gemini API not initialized. Please provide an API key.");
+    }
+
+    const CHUNK_SIZE = 16;
+    if (cropDataUrls.length <= CHUNK_SIZE) {
+      return this.extractAndTranslateChunk(cropDataUrls, bubbleTypes, targetLang);
+    }
+
+    const results: Array<{ originalText: string; translatedText: string }> = [];
+    for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {
+      const urlChunk = cropDataUrls.slice(i, i + CHUNK_SIZE);
+      const typeChunk = bubbleTypes.slice(i, i + CHUNK_SIZE);
+      const chunkResults = await this.extractAndTranslateChunk(urlChunk, typeChunk, targetLang);
+      results.push(...chunkResults);
+    }
+    return results;
   }
 
   async batchTranslate(
