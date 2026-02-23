@@ -9,6 +9,8 @@ export class GeminiService {
   private model: any = null;
   private fallbackModel: any = null;
   private usingFallback = false;
+  public totalInputTokens = 0;
+  public totalOutputTokens = 0;
 
   constructor(apiKey?: string) {
     if (apiKey) {
@@ -30,6 +32,11 @@ export class GeminiService {
   private switchToFallback() {
     console.log(`[API] Rate limit hit on ${PRIMARY_MODEL}, switching to ${FALLBACK_MODEL}`);
     this.usingFallback = true;
+  }
+
+  resetTokenCount() {
+    this.totalInputTokens = 0;
+    this.totalOutputTokens = 0;
   }
 
   clear() {
@@ -169,7 +176,9 @@ export class GeminiService {
     if (
       status === 401 ||
       msg.includes("unauthenticated") ||
-      msg.includes("invalid api key")
+      msg.includes("invalid api key") ||
+      msg.includes("api key not valid") ||
+      msg.includes("api_key_invalid")
     ) {
       return "Invalid API key. Please check your Gemini API key in the extension settings.";
     }
@@ -195,18 +204,27 @@ export class GeminiService {
     return error.message || "Unknown Gemini API error";
   }
 
+  private accumulateTokens(result: any) {
+    const usage = result?.response?.usageMetadata;
+    if (!usage) return;
+    if (typeof usage.promptTokenCount === "number") this.totalInputTokens += usage.promptTokenCount;
+    if (typeof usage.candidatesTokenCount === "number") this.totalOutputTokens += usage.candidatesTokenCount;
+  }
+
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
-  ): Promise<T> {
+  ): Promise<{ value: T; wasRateLimited: boolean }> {
     try {
-      return await fn();
+      const value = await fn();
+      return { value, wasRateLimited: false };
     } catch (error: any) {
       if (this.isRateLimit(error)) {
         if (!this.usingFallback) {
           this.switchToFallback();
           console.log(`[API] Rate limit on primary model, retrying once with fallback`);
           try {
-            return await fn();
+            const value = await fn();
+            return { value, wasRateLimited: true };
           } catch (fallbackError: any) {
             const userError = new Error(this.getUserFacingError(fallbackError));
             (userError as any).cause = fallbackError;
@@ -227,7 +245,8 @@ export class GeminiService {
         console.log(`[API] Retrying after ${delay}ms due to: ${error.message}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         try {
-          return await fn();
+          const value = await fn();
+          return { value, wasRateLimited: false };
         } catch (retryError: any) {
           const userError = new Error(this.getUserFacingError(retryError));
           (userError as any).cause = retryError;
@@ -246,12 +265,12 @@ export class GeminiService {
   async detectTextRegionsWithOCR(
     imageData: string,
     targetLang: string = "en",
-  ): Promise<TextRegion[]> {
+  ): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
     if (!this.model) {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
 
-    return this.retryWithBackoff(async () => {
+    const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
       console.log("[API] Gemini detectTextRegionsWithOCR called");
 
       const prompt = `You are analyzing a manga/comic image. Detect every speech bubble, thought bubble, narration box, and sound effect text region. Translate all detected text to ${targetLang}.
@@ -310,6 +329,7 @@ If no text is found, return: []`;
       };
 
       const result = await this.getActiveModel().generateContent([prompt, imagePart]);
+      this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
 
@@ -354,48 +374,85 @@ If no text is found, return: []`;
       }
 
       console.warn("[API] Returning empty array - no text detected");
-      return [];
+      return [] as TextRegion[];
     });
+    return { regions: value, wasRateLimited };
   }
 
-  async extractAndTranslateFromCrop(
-    cropDataUrl: string,
-    targetLang: string = "en",
-  ): Promise<{ originalText: string; translatedText: string }> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
+  private async extractAndTranslateChunk(
+    cropDataUrls: string[],
+    bubbleTypes: string[],
+    targetLang: string,
+  ): Promise<{ translations: Array<{ originalText: string; translatedText: string }>; wasRateLimited: boolean }> {
+    const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
+      const imageDescriptions = cropDataUrls
+        .map((_, i) => `[Image ${i + 1} - ${bubbleTypes[i] ?? "speech"}]`)
+        .join(", ");
 
-    return this.retryWithBackoff(async () => {
-      const prompt = `Extract all text from this speech bubble image and translate it to ${targetLang}. Return ONLY valid JSON with exactly two fields: "originalText" and "translatedText". If no text is found, return {"originalText":"","translatedText":""}.`;
+      const prompt =
+        `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
+        `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
+        `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
+        `For each image extract all text and translate it to ${targetLang}. ` +
+        `Return ONLY a valid JSON array with exactly ${cropDataUrls.length} objects in the same order as the images. ` +
+        `Each object must have exactly two fields: "originalText" and "translatedText". If an image has no text, use empty strings. ` +
+        `Example: [{"originalText":"...","translatedText":"..."},{"originalText":"","translatedText":""}]`;
 
-      const imagePart = {
-        inlineData: {
-          data: cropDataUrl.split(",")[1],
-          mimeType: "image/png",
-        },
-      };
+      const parts: any[] = [prompt];
+      for (const dataUrl of cropDataUrls) {
+        parts.push({ inlineData: { data: dataUrl.split(",")[1], mimeType: "image/png" } });
+      }
 
-      const result = await this.getActiveModel().generateContent([prompt, imagePart]);
+      const result = await this.getActiveModel().generateContent(parts);
+      this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
 
       try {
         const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            originalText: parsed.originalText || "",
-            translatedText: parsed.translatedText || "",
-          };
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) => ({
+              originalText: item.originalText || "",
+              translatedText: item.translatedText || "",
+            })) as Array<{ originalText: string; translatedText: string }>;
+          }
         }
       } catch {
-        return { originalText: "", translatedText: "" };
+        // fall through to per-item fallback
       }
 
-      return { originalText: "", translatedText: "" };
+      return cropDataUrls.map(() => ({ originalText: "", translatedText: "" }));
     });
+    return { translations: value, wasRateLimited };
+  }
+
+  async extractAndTranslateFromCrops(
+    cropDataUrls: string[],
+    bubbleTypes: string[],
+    targetLang: string = "en",
+  ): Promise<{ translations: Array<{ originalText: string; translatedText: string }>; wasRateLimited: boolean }> {
+    if (!this.model) {
+      throw new Error("Gemini API not initialized. Please provide an API key.");
+    }
+
+    const CHUNK_SIZE = 16;
+    if (cropDataUrls.length <= CHUNK_SIZE) {
+      return this.extractAndTranslateChunk(cropDataUrls, bubbleTypes, targetLang);
+    }
+
+    const translations: Array<{ originalText: string; translatedText: string }> = [];
+    let anyRateLimited = false;
+    for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {
+      const urlChunk = cropDataUrls.slice(i, i + CHUNK_SIZE);
+      const typeChunk = bubbleTypes.slice(i, i + CHUNK_SIZE);
+      const chunk = await this.extractAndTranslateChunk(urlChunk, typeChunk, targetLang);
+      translations.push(...chunk.translations);
+      if (chunk.wasRateLimited) anyRateLimited = true;
+    }
+    return { translations, wasRateLimited: anyRateLimited };
   }
 
   async batchTranslate(

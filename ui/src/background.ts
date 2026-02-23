@@ -1,12 +1,13 @@
 import { geminiService } from "~/api/services";
-import type { TextRegion, YoloBubble } from "~/types/translator.types";
+import type { TextRegion, DetectedBubble } from "~/types/translator.types";
 
-const PYTHON_SERVER_URL = "http://localhost:5001";
-let pythonServerAvailable: boolean | null = null;
+const MODEL_SERVER_URL = "http://localhost:5001";
+let modelAvailable: boolean | null = null;
 let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 30000;
-let yoloConsecutiveFailures = 0;
-const YOLO_MAX_FAILURES = 3;
+let detectorConsecutiveFailures = 0;
+const DETECTOR_MAX_FAILURES = 3;
+const batchAbortedByTab = new Map<number, boolean>();
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
@@ -15,7 +16,7 @@ chrome.runtime.onInstalled.addListener(() => {
 class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
-  private concurrent = 3;
+  private concurrent = 5;
   private active = 0;
 
   async add<T>(fn: () => Promise<T>): Promise<T> {
@@ -126,6 +127,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "PROCESS_IMAGES_BATCH") {
+    const tabId = sender.tab?.id;
+    if (tabId !== undefined) batchAbortedByTab.set(tabId, false);
+    sendResponse({ success: true });
+    handleProcessImagesBatch(request, tabId);
+    return false;
+  }
+
+  if (request.action === "STOP_TRANSLATION") {
+    const tabId = sender.tab?.id ?? request.tabId;
+    if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+    sendResponse({ success: true });
+    return false;
+  }
+
   if (request.action === "UPDATE_API_KEY") {
     const newKey = request.apiKey?.trim();
     if (newKey) {
@@ -166,42 +182,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
-async function checkPythonServer(): Promise<boolean> {
+async function checkModel(): Promise<boolean> {
   const now = Date.now();
-  if (pythonServerAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
-    return pythonServerAvailable;
+  if (modelAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
+    return modelAvailable;
   }
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${PYTHON_SERVER_URL}/health`, { signal: controller.signal });
+    const resp = await fetch(`${MODEL_SERVER_URL}/health`, { signal: controller.signal });
     clearTimeout(timeout);
     if (resp.ok) {
       const data = await resp.json();
-      pythonServerAvailable = data.model_loaded === true;
-      if (pythonServerAvailable) yoloConsecutiveFailures = 0;
+      modelAvailable = data.model_loaded === true;
+      if (modelAvailable) detectorConsecutiveFailures = 0;
     } else {
-      pythonServerAvailable = false;
+      modelAvailable = false;
     }
   } catch {
-    pythonServerAvailable = false;
+    modelAvailable = false;
   }
   lastHealthCheck = Date.now();
-  console.log(`[BACKGROUND] Python server available: ${pythonServerAvailable}`);
-  return pythonServerAvailable;
+  console.log(`[BACKGROUND] Model available: ${modelAvailable}`);
+  return modelAvailable;
 }
 
-async function detectBubblesViaPython(
+async function detectBubblesViaModel(
   imageDataUrl: string,
   targetLang: string,
-): Promise<TextRegion[]> {
+): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
 
-  let bubbles: YoloBubble[];
+  let bubbles: DetectedBubble[];
 
   try {
-    const response = await fetch(`${PYTHON_SERVER_URL}/detect-bubbles`, {
+    const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json" },
@@ -209,7 +225,7 @@ async function detectBubblesViaPython(
     });
 
     if (!response.ok) {
-      throw new Error(`Python server returned ${response.status}`);
+      throw new Error(`Model server returned ${response.status}`);
     }
 
     const data = await response.json();
@@ -218,16 +234,25 @@ async function detectBubblesViaPython(
     clearTimeout(timeout);
   }
 
+  const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
+
+  let translations: Array<{ originalText: string; translatedText: string }> = [];
+  let wasRateLimited = false;
+  if (validBubbles.length > 0) {
+    const result = await geminiService.extractAndTranslateFromCrops(
+      validBubbles.map((b) => b.cropDataUrl),
+      validBubbles.map((b) => b.bubbleType ?? "speech"),
+      targetLang,
+    );
+    translations = result.translations;
+    wasRateLimited = result.wasRateLimited;
+  }
+
   const textRegions: TextRegion[] = [];
-
-  for (const bubble of bubbles) {
-    if (!bubble.cropDataUrl) continue;
-
-    const { originalText, translatedText } =
-      await geminiService.extractAndTranslateFromCrop(bubble.cropDataUrl, targetLang);
-
+  for (let i = 0; i < validBubbles.length; i++) {
+    const bubble = validBubbles[i];
+    const { originalText, translatedText } = translations[i] ?? { originalText: "", translatedText: "" };
     if (!originalText.trim() || !translatedText.trim()) continue;
-
     textRegions.push({
       originalText,
       translatedText,
@@ -240,8 +265,8 @@ async function detectBubblesViaPython(
     });
   }
 
-  console.log(`[BACKGROUND] YOLO returned ${textRegions.length} text bubbles`);
-  return textRegions;
+  console.log(`[BACKGROUND] RT-DETR returned ${textRegions.length} text bubbles`);
+  return { regions: textRegions, wasRateLimited };
 }
 
 async function handleFetchImage(url: string): Promise<string> {
@@ -303,8 +328,6 @@ async function handleProcessImages(request: any, tabId?: number) {
       let textRegions = await cache.get(imageHash, settings.targetLanguage);
 
       if (!textRegions) {
-        console.log(`[BACKGROUND] Cache miss for ${image.id}, calling API`);
-
         textRegions = await requestQueue.add(async () => {
           if (!geminiService.isInitialized()) {
             throw new Error(
@@ -312,27 +335,26 @@ async function handleProcessImages(request: any, tabId?: number) {
             );
           }
 
-          const useYolo = await checkPythonServer();
+          const useDetector = await checkModel();
 
-          if (useYolo) {
+          if (useDetector) {
             try {
-              const regions = await detectBubblesViaPython(
+              const { regions, wasRateLimited } = await detectBubblesViaModel(
                 image.dataUrl,
                 settings.targetLanguage,
               );
-              yoloConsecutiveFailures = 0;
-              return regions;
-            } catch (yoloError: any) {
-              yoloConsecutiveFailures++;
-              console.warn(`[BACKGROUND] YOLO failed (${yoloConsecutiveFailures}/${YOLO_MAX_FAILURES}), falling back to Gemini:`, yoloError.message);
-              if (yoloConsecutiveFailures >= YOLO_MAX_FAILURES) {
-                pythonServerAvailable = false;
-                console.warn(`[BACKGROUND] YOLO disabled after ${YOLO_MAX_FAILURES} consecutive failures`);
+              detectorConsecutiveFailures = 0;
+              return { textRegions: regions, wasRateLimited };
+            } catch (detectorError: any) {
+              detectorConsecutiveFailures++;
+              console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
+              if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
+                modelAvailable = false;
               }
             }
           }
 
-          const regions = await geminiService.detectTextRegionsWithOCR(
+          const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(
             image.dataUrl,
             settings.targetLanguage,
           );
@@ -340,19 +362,20 @@ async function handleProcessImages(request: any, tabId?: number) {
           console.log(
             `[BACKGROUND] Gemini returned ${regions.length} text regions for ${image.id}`,
           );
-          return regions;
+          return { textRegions: regions, wasRateLimited };
         });
 
-        await cache.set(imageHash, settings.targetLanguage, textRegions);
+        await cache.set(imageHash, settings.targetLanguage, textRegions.textRegions);
       } else {
         console.log(`[BACKGROUND] Cache hit for ${image.id}`);
       }
 
       results.push({
         imageId: image.id,
-        textRegions: textRegions || [],
+        textRegions: (textRegions as any)?.textRegions || textRegions || [],
         cached: false,
         error: null,
+        wasRateLimited: (textRegions as any)?.wasRateLimited ?? false,
       });
     } catch (error: any) {
       console.error(
@@ -403,5 +426,112 @@ async function handleProcessImages(request: any, tabId?: number) {
     );
   }
 
-  return { success: true, results };
+  const wasRateLimited = results.some((r) => r.wasRateLimited);
+  return { success: true, results, wasRateLimited };
+}
+
+async function processSinglePanel(
+  image: { id: string; dataUrl: string },
+  settings: any,
+): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; error: string | null }> {
+  await initPromise;
+  const imageHash = await TranslationCache.hashImage(image.dataUrl);
+  const cached = await cache.get(imageHash, settings.targetLanguage);
+  if (cached) {
+    console.log(`[BACKGROUND] Cache hit for ${image.id}`);
+    return { textRegions: cached, wasRateLimited: false, isRateLimit: false, error: null };
+  }
+
+  try {
+    const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
+      if (!geminiService.isInitialized()) {
+        throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
+      }
+      const useDetector = await checkModel();
+      if (useDetector) {
+        try {
+          const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
+          detectorConsecutiveFailures = 0;
+          return { textRegions: regions, wasRateLimited };
+        } catch (detectorError: any) {
+          detectorConsecutiveFailures++;
+          console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
+          if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
+            modelAvailable = false;
+          }
+        }
+      }
+      const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
+      return { textRegions: regions, wasRateLimited };
+    });
+    await cache.set(imageHash, settings.targetLanguage, textRegions);
+    return { textRegions: textRegions || [], wasRateLimited, isRateLimit: false, error: null };
+  } catch (error: any) {
+    const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
+    return { textRegions: [], wasRateLimited: false, isRateLimit, error: error.message || "Processing failed" };
+  }
+}
+
+async function handleProcessImagesBatch(request: any, tabId?: number) {
+  const { images, settings } = request;
+  const total = images.length;
+  let completed = 0;
+  let anyRateLimited = false;
+  let anySuccess = false;
+  let rateLimitHit = false;
+  const startTime = Date.now();
+
+  console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
+
+  const sendToTab = (msg: any) => {
+    if (tabId) chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+  };
+  const sendToPopup = (msg: any) => {
+    chrome.runtime.sendMessage(msg).catch(() => {});
+  };
+
+  const isAborted = () => tabId !== undefined && batchAbortedByTab.get(tabId) === true;
+
+  await Promise.allSettled(
+    images.map(async (image: { id: string; dataUrl: string }) => {
+      if (isAborted()) return;
+
+      const result = await processSinglePanel(image, settings);
+
+      if (isAborted()) return;
+
+      completed++;
+
+      if (result.isRateLimit) {
+        rateLimitHit = true;
+        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+        sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
+      } else {
+        if (result.textRegions.length > 0) anySuccess = true;
+        if (result.wasRateLimited) anyRateLimited = true;
+        sendToTab({ action: "PANEL_RESULT", imageId: image.id, textRegions: result.textRegions, wasRateLimited: result.wasRateLimited });
+      }
+
+      sendToPopup({ action: "PROGRESS_UPDATE", current: completed, total, status: "processing" });
+    })
+  );
+
+  const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+  const inputTokens = geminiService.totalInputTokens;
+  const outputTokens = geminiService.totalOutputTokens;
+  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | tokens — input: ${inputTokens}, output: ${outputTokens}, total: ${inputTokens + outputTokens}`);
+  geminiService.resetTokenCount();
+
+  const wasStopped = isAborted();
+  if (tabId !== undefined) batchAbortedByTab.delete(tabId);
+
+  if (wasStopped && !rateLimitHit) {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true });
+  } else if (rateLimitHit) {
+    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });
+  } else if (!anySuccess) {
+    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again." });
+  } else {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed });
+  }
 }

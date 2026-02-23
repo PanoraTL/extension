@@ -127,7 +127,8 @@ function IndexPopup() {
         }
       } else if (message.action === "ERROR") {
         if (statusRef.current !== "idle") {
-          showErrorToast("Translation failed", message.error || undefined);
+          const title = message.isRateLimit ? "Rate limit hit" : "Translation failed";
+          showErrorToast(title, message.error || undefined);
         }
         statusRef.current = "idle";
         setStatus("idle");
@@ -157,6 +158,7 @@ function IndexPopup() {
       return;
     }
     setProgress({ current: 0, total: 0 });
+    statusRef.current = "processing";
     setStatus("processing");
     try {
       const [tab] = await chrome.tabs.query({
@@ -165,6 +167,7 @@ function IndexPopup() {
       });
       if (!tab.id) {
         showErrorToast("No active tab found");
+        statusRef.current = "idle";
         setStatus("idle");
         return;
       }
@@ -174,12 +177,14 @@ function IndexPopup() {
         () => {
           if (chrome.runtime.lastError) {
             showErrorToast("Unexpected error", chrome.runtime.lastError.message);
+            statusRef.current = "idle";
             setStatus("idle");
           }
         },
       );
     } catch (err: any) {
       showErrorToast("Failed to start translation", err.message);
+      statusRef.current = "idle";
       setStatus("idle");
     }
   };
@@ -192,10 +197,12 @@ function IndexPopup() {
       });
       if (!tab.id) return;
       chrome.tabs.sendMessage(tab.id, { action: "STOP_TRANSLATION" }, () => {
-        if (chrome.runtime.lastError) {
-          console.error("Stop translation error:", chrome.runtime.lastError);
-        }
+        void chrome.runtime.lastError;
       });
+      chrome.runtime.sendMessage({ action: "STOP_TRANSLATION", tabId: tab.id }, () => {
+        void chrome.runtime.lastError;
+      });
+      statusRef.current = "idle";
       setStatus("idle");
       setProgress({ current: 0, total: 0 });
     } catch (err) {
@@ -715,7 +722,7 @@ function IndexPopup() {
                         type="button"
                         onClick={() => setShowApiKey((v) => !v)}
                         title={showApiKey ? "Hide key" : "Show key"}
-                        style={{ background: showApiKey ? "rgba(193,95,60,0.12)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
+                        style={{ background: showApiKey ? "rgba(193,95,60,0.12)" : "#fff", borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s" }}
                       >
                         {showApiKey ? (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -741,7 +748,7 @@ function IndexPopup() {
                           }
                         }}
                         title="Copy key"
-                        style={{ background: copied ? "rgba(76,175,80,0.1)" : "#fff", border: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s, color 0.15s" }}
+                        style={{ background: copied ? "rgba(76,175,80,0.1)" : "#fff", borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "1px solid #E89878", cursor: "pointer", padding: "0 10px", color: copied ? "#4CAF50" : "#C15F3C", display: "flex", alignItems: "center", transition: "background 0.15s, color 0.15s" }}
                       >
                         {copied ? (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
