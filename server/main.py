@@ -203,7 +203,7 @@ async def detect_bubbles(request: DetectRequest):
     used_text_bubbles = set()
     results: List[BubbleResult] = []
 
-    def make_result(overlay_box, crop_box, confidence, is_free=False, clip_box=None):
+    def make_result(overlay_box, confidence, is_free=False, clip_box=None):
         x1, y1, x2, y2 = overlay_box
         if clip_box is not None:
             x1 = max(x1, clip_box[0])
@@ -237,11 +237,7 @@ async def detect_bubbles(request: DetectRequest):
         pct_w = (raw_w / img_w) * 100
         pct_h = (raw_h / img_h) * 100
 
-        crop_x1 = max(0, crop_box[0])
-        crop_y1 = max(0, crop_box[1])
-        crop_x2 = min(img_w, crop_box[2])
-        crop_y2 = min(img_h, crop_box[3])
-        crop = pil_image.crop((int(crop_x1), int(crop_y1), int(crop_x2), int(crop_y2)))
+        crop = pil_image.crop((int(cx1), int(cy1), int(cx2), int(cy2)))
         crop_data_url = encode_crop(crop)
         bg_color = sample_background_color(crop)
         font_size_pct = round((raw_h / img_h) * 100 / 2.5, 2)
@@ -275,7 +271,7 @@ async def detect_bubbles(request: DetectRequest):
         if best_idx is not None and best_iou > 0.1:
             used_text_bubbles.add(best_idx)
             tb_box = text_bubble_list[best_idx][0]
-            result = make_result(tb_box, tb_box, bubble_score, clip_box=bubble_box)
+            result = make_result(tb_box, bubble_score, clip_box=bubble_box)
             if result is not None:
                 results.append(result)
 
@@ -288,12 +284,12 @@ async def detect_bubbles(request: DetectRequest):
         inset_x = bw * 0.06
         inset_y = bh * 0.04
         clip = [bx1 + inset_x, by1 + inset_y, bx2 - inset_x, by2 - inset_y]
-        result = make_result(tb_box, tb_box, tb_score, clip_box=clip)
+        result = make_result(tb_box, tb_score, clip_box=clip)
         if result is not None:
             results.append(result)
 
     for tf_box, tf_score in text_free_list:
-        result = make_result(tf_box, tf_box, tf_score, is_free=True)
+        result = make_result(tf_box, tf_score, is_free=True)
         if result is not None:
             results.append(result)
 
