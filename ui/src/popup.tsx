@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Toaster, toast } from "sonner";
 import "~/style.css";
 import logoSrc from "~/assets/orangesquare.png";
@@ -65,6 +65,7 @@ function IndexPopup() {
   };
 
   const [status, setStatus] = useState<TranslationStatus>("idle");
+  const statusRef = useRef<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [showSettings, setShowSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<TranslationSettings>({
@@ -109,8 +110,10 @@ function IndexPopup() {
       if (message.action === "PROGRESS_UPDATE") {
         setProgress({ current: message.current, total: message.total });
         const newStatus = message.status || "processing";
+        const prevStatus = statusRef.current;
+        statusRef.current = newStatus;
         setStatus(newStatus);
-        if (newStatus === "complete") {
+        if (newStatus === "complete" && prevStatus !== "complete") {
           toast.custom((t) => (
             <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #4CAF50", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
               <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#4CAF50", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
@@ -118,11 +121,15 @@ function IndexPopup() {
               <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{message.total} panel{message.total !== 1 ? "s" : ""} translated</div>
             </div>
           ), { duration: 4000 });
+          statusRef.current = "idle";
           setStatus("idle");
           setProgress({ current: 0, total: 0 });
         }
       } else if (message.action === "ERROR") {
-        showErrorToast("Translation failed", message.error || undefined);
+        if (statusRef.current !== "idle") {
+          showErrorToast("Translation failed", message.error || undefined);
+        }
+        statusRef.current = "idle";
         setStatus("idle");
         setProgress({ current: 0, total: 0 });
       }
