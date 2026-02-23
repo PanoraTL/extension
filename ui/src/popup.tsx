@@ -197,9 +197,10 @@ function IndexPopup() {
       });
       if (!tab.id) return;
       chrome.tabs.sendMessage(tab.id, { action: "STOP_TRANSLATION" }, () => {
-        if (chrome.runtime.lastError) {
-          console.error("Stop translation error:", chrome.runtime.lastError);
-        }
+        void chrome.runtime.lastError;
+      });
+      chrome.runtime.sendMessage({ action: "STOP_TRANSLATION", tabId: tab.id }, () => {
+        void chrome.runtime.lastError;
       });
       statusRef.current = "idle";
       setStatus("idle");

@@ -157,12 +157,28 @@ const MangaTranslator = () => {
       const total = validPanels.length;
       notifyPopup({ action: "PROGRESS_UPDATE", current: 0, total, status: "processing" });
 
-      try {
+      const CHUNK_SIZE = 10;
+      const sendChunk = (startIndex: number) => {
+        if (startIndex >= validPanels.length) return;
+        const chunk = validPanels.slice(startIndex, startIndex + CHUNK_SIZE);
         chrome.runtime.sendMessage({
           action: "PROCESS_IMAGES_BATCH",
-          images: validPanels.map((p) => ({ id: p.id, dataUrl: p.dataUrl })),
+          images: chunk.map((p) => ({ id: p.id, dataUrl: p.dataUrl })),
           settings: settingsRef.current,
-        }, () => { void chrome.runtime.lastError; });
+          total,
+        }, (response) => {
+          if (chrome.runtime.lastError || !response?.success) {
+            console.error("[TRANSLATOR] Batch send failed:", chrome.runtime.lastError?.message);
+            notifyPopup({ action: "ERROR", error: "Failed to start translation — extension context unavailable." });
+            processingRef.current = false;
+            return;
+          }
+          sendChunk(startIndex + CHUNK_SIZE);
+        });
+      };
+
+      try {
+        sendChunk(0);
       } catch (err) {
         console.error("[TRANSLATOR] Failed to send batch message:", err);
         notifyPopup({ action: "ERROR", error: "Failed to start translation." });
@@ -181,20 +197,24 @@ const MangaTranslator = () => {
     const handleMessage = (message: any, _: chrome.runtime.MessageSender, sendResponse: (r?: any) => void) => {
       if (message.action === "PANEL_RESULT") {
         const el = pendingPanelsRef.current.get(message.imageId);
-        if (el && message.textRegions?.length > 0) {
-          const container = createOverlayContainer(el, message.imageId);
-          setOverlays((prev) => {
-            const m = new Map(prev);
-            m.set(message.imageId, { element: el, textRegions: message.textRegions, container });
-            return m;
-          });
+        if (el) {
           el.setAttribute("data-panora-translated", "1");
+          if (message.textRegions?.length > 0) {
+            const container = createOverlayContainer(el, message.imageId);
+            setOverlays((prev) => {
+              const m = new Map(prev);
+              m.set(message.imageId, { element: el, textRegions: message.textRegions, container });
+              return m;
+            });
+          }
         }
         return false;
       }
       if (message.action === "BATCH_COMPLETE") {
         processingRef.current = false;
-        if (!message.success) {
+        if (message.stopped) {
+          // user stopped intentionally — go idle without any toast
+        } else if (!message.success) {
           notifyPopup({ action: "ERROR", error: message.error, isRateLimit: message.isRateLimit });
         } else if (message.wasRateLimited) {
           notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed via fallback model.", isRateLimit: true });

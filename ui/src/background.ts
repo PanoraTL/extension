@@ -7,7 +7,7 @@ let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 30000;
 let detectorConsecutiveFailures = 0;
 const DETECTOR_MAX_FAILURES = 3;
-let batchAborted = false;
+const batchAbortedByTab = new Map<number, boolean>();
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
@@ -128,15 +128,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "PROCESS_IMAGES_BATCH") {
-    batchAborted = false;
     const tabId = sender.tab?.id;
+    if (tabId !== undefined) batchAbortedByTab.set(tabId, false);
     sendResponse({ success: true });
     handleProcessImagesBatch(request, tabId);
     return false;
   }
 
   if (request.action === "STOP_TRANSLATION") {
-    batchAborted = true;
+    const tabId = sender.tab?.id ?? request.tabId;
+    if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
     sendResponse({ success: true });
     return false;
   }
@@ -209,7 +210,7 @@ async function checkModel(): Promise<boolean> {
 async function detectBubblesViaModel(
   imageDataUrl: string,
   targetLang: string,
-): Promise<TextRegion[]> {
+): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
 
@@ -235,13 +236,17 @@ async function detectBubblesViaModel(
 
   const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
 
-  const translations = validBubbles.length > 0
-    ? await geminiService.extractAndTranslateFromCrops(
-        validBubbles.map((b) => b.cropDataUrl),
-        validBubbles.map((b) => b.bubbleType ?? "speech"),
-        targetLang,
-      )
-    : [];
+  let translations: Array<{ originalText: string; translatedText: string }> = [];
+  let wasRateLimited = false;
+  if (validBubbles.length > 0) {
+    const result = await geminiService.extractAndTranslateFromCrops(
+      validBubbles.map((b) => b.cropDataUrl),
+      validBubbles.map((b) => b.bubbleType ?? "speech"),
+      targetLang,
+    );
+    translations = result.translations;
+    wasRateLimited = result.wasRateLimited;
+  }
 
   const textRegions: TextRegion[] = [];
   for (let i = 0; i < validBubbles.length; i++) {
@@ -261,7 +266,7 @@ async function detectBubblesViaModel(
   }
 
   console.log(`[BACKGROUND] RT-DETR returned ${textRegions.length} text bubbles`);
-  return textRegions;
+  return { regions: textRegions, wasRateLimited };
 }
 
 async function handleFetchImage(url: string): Promise<string> {
@@ -334,12 +339,12 @@ async function handleProcessImages(request: any, tabId?: number) {
 
           if (useDetector) {
             try {
-              const regions = await detectBubblesViaModel(
+              const { regions, wasRateLimited } = await detectBubblesViaModel(
                 image.dataUrl,
                 settings.targetLanguage,
               );
               detectorConsecutiveFailures = 0;
-              return regions;
+              return { textRegions: regions, wasRateLimited };
             } catch (detectorError: any) {
               detectorConsecutiveFailures++;
               console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
@@ -349,7 +354,7 @@ async function handleProcessImages(request: any, tabId?: number) {
             }
           }
 
-          const regions = await geminiService.detectTextRegionsWithOCR(
+          const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(
             image.dataUrl,
             settings.targetLanguage,
           );
@@ -357,20 +362,20 @@ async function handleProcessImages(request: any, tabId?: number) {
           console.log(
             `[BACKGROUND] Gemini returned ${regions.length} text regions for ${image.id}`,
           );
-          return regions;
+          return { textRegions: regions, wasRateLimited };
         });
 
-        await cache.set(imageHash, settings.targetLanguage, textRegions);
+        await cache.set(imageHash, settings.targetLanguage, textRegions.textRegions);
       } else {
         console.log(`[BACKGROUND] Cache hit for ${image.id}`);
       }
 
       results.push({
         imageId: image.id,
-        textRegions: textRegions || [],
+        textRegions: (textRegions as any)?.textRegions || textRegions || [],
         cached: false,
         error: null,
-        wasRateLimited: geminiService.lastCallWasRateLimited,
+        wasRateLimited: (textRegions as any)?.wasRateLimited ?? false,
       });
     } catch (error: any) {
       console.error(
@@ -428,26 +433,26 @@ async function handleProcessImages(request: any, tabId?: number) {
 async function processSinglePanel(
   image: { id: string; dataUrl: string },
   settings: any,
-): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; error: string | null }> {
+): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; error: string | null }> {
   await initPromise;
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
   const cached = await cache.get(imageHash, settings.targetLanguage);
   if (cached) {
     console.log(`[BACKGROUND] Cache hit for ${image.id}`);
-    return { textRegions: cached, wasRateLimited: false, error: null };
+    return { textRegions: cached, wasRateLimited: false, isRateLimit: false, error: null };
   }
 
   try {
-    const textRegions = await requestQueue.add(async () => {
+    const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
       const useDetector = await checkModel();
       if (useDetector) {
         try {
-          const regions = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
+          const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
           detectorConsecutiveFailures = 0;
-          return regions;
+          return { textRegions: regions, wasRateLimited };
         } catch (detectorError: any) {
           detectorConsecutiveFailures++;
           console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
@@ -456,15 +461,14 @@ async function processSinglePanel(
           }
         }
       }
-      return await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
+      const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
+      return { textRegions: regions, wasRateLimited };
     });
     await cache.set(imageHash, settings.targetLanguage, textRegions);
-    return { textRegions: textRegions || [], wasRateLimited: geminiService.lastCallWasRateLimited, error: null };
+    return { textRegions: textRegions || [], wasRateLimited, isRateLimit: false, error: null };
   } catch (error: any) {
-    if (error.isRateLimit || geminiService.isRateLimit(error)) {
-      return { textRegions: [], wasRateLimited: false, error: error.message, };
-    }
-    return { textRegions: [], wasRateLimited: false, error: error.message || "Processing failed" };
+    const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
+    return { textRegions: [], wasRateLimited: false, isRateLimit, error: error.message || "Processing failed" };
   }
 }
 
@@ -486,19 +490,21 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     chrome.runtime.sendMessage(msg).catch(() => {});
   };
 
+  const isAborted = () => tabId !== undefined && batchAbortedByTab.get(tabId) === true;
+
   await Promise.allSettled(
     images.map(async (image: { id: string; dataUrl: string }) => {
-      if (batchAborted) return;
+      if (isAborted()) return;
 
       const result = await processSinglePanel(image, settings);
 
-      if (batchAborted) return;
+      if (isAborted()) return;
 
       completed++;
 
-      if (result.error && (result.error.toLowerCase().includes("rate limit") || result.error.toLowerCase().includes("quota"))) {
+      if (result.isRateLimit) {
         rateLimitHit = true;
-        batchAborted = true;
+        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
         sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
       } else {
         if (result.textRegions.length > 0) anySuccess = true;
@@ -516,7 +522,10 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | tokens — input: ${inputTokens}, output: ${outputTokens}, total: ${inputTokens + outputTokens}`);
   geminiService.resetTokenCount();
 
-  if (batchAborted && !rateLimitHit) {
+  const wasStopped = isAborted();
+  if (tabId !== undefined) batchAbortedByTab.delete(tabId);
+
+  if (wasStopped && !rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true });
   } else if (rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });

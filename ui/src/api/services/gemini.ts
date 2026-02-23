@@ -9,7 +9,6 @@ export class GeminiService {
   private model: any = null;
   private fallbackModel: any = null;
   private usingFallback = false;
-  public lastCallWasRateLimited = false;
   public totalInputTokens = 0;
   public totalOutputTokens = 0;
 
@@ -214,19 +213,18 @@ export class GeminiService {
 
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
-  ): Promise<T> {
-    this.lastCallWasRateLimited = false;
+  ): Promise<{ value: T; wasRateLimited: boolean }> {
     try {
-      return await fn();
+      const value = await fn();
+      return { value, wasRateLimited: false };
     } catch (error: any) {
       if (this.isRateLimit(error)) {
         if (!this.usingFallback) {
           this.switchToFallback();
           console.log(`[API] Rate limit on primary model, retrying once with fallback`);
           try {
-            const result = await fn();
-            this.lastCallWasRateLimited = true;
-            return result;
+            const value = await fn();
+            return { value, wasRateLimited: true };
           } catch (fallbackError: any) {
             const userError = new Error(this.getUserFacingError(fallbackError));
             (userError as any).cause = fallbackError;
@@ -247,7 +245,8 @@ export class GeminiService {
         console.log(`[API] Retrying after ${delay}ms due to: ${error.message}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         try {
-          return await fn();
+          const value = await fn();
+          return { value, wasRateLimited: false };
         } catch (retryError: any) {
           const userError = new Error(this.getUserFacingError(retryError));
           (userError as any).cause = retryError;
@@ -266,12 +265,12 @@ export class GeminiService {
   async detectTextRegionsWithOCR(
     imageData: string,
     targetLang: string = "en",
-  ): Promise<TextRegion[]> {
+  ): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
     if (!this.model) {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
 
-    return this.retryWithBackoff(async () => {
+    const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
       console.log("[API] Gemini detectTextRegionsWithOCR called");
 
       const prompt = `You are analyzing a manga/comic image. Detect every speech bubble, thought bubble, narration box, and sound effect text region. Translate all detected text to ${targetLang}.
@@ -375,57 +374,17 @@ If no text is found, return: []`;
       }
 
       console.warn("[API] Returning empty array - no text detected");
-      return [];
+      return [] as TextRegion[];
     });
-  }
-
-  async extractAndTranslateFromCrop(
-    cropDataUrl: string,
-    targetLang: string = "en",
-  ): Promise<{ originalText: string; translatedText: string }> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    return this.retryWithBackoff(async () => {
-      const prompt = `Extract all text from this speech bubble image and translate it to ${targetLang}. Return ONLY valid JSON with exactly two fields: "originalText" and "translatedText". If no text is found, return {"originalText":"","translatedText":""}.`;
-
-      const imagePart = {
-        inlineData: {
-          data: cropDataUrl.split(",")[1],
-          mimeType: "image/png",
-        },
-      };
-
-      const result = await this.getActiveModel().generateContent([prompt, imagePart]);
-      this.accumulateTokens(result);
-      const response = await result.response;
-      const text = response.text();
-
-      try {
-        const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            originalText: parsed.originalText || "",
-            translatedText: parsed.translatedText || "",
-          };
-        }
-      } catch {
-        return { originalText: "", translatedText: "" };
-      }
-
-      return { originalText: "", translatedText: "" };
-    });
+    return { regions: value, wasRateLimited };
   }
 
   private async extractAndTranslateChunk(
     cropDataUrls: string[],
     bubbleTypes: string[],
     targetLang: string,
-  ): Promise<Array<{ originalText: string; translatedText: string }>> {
-    return this.retryWithBackoff(async () => {
+  ): Promise<{ translations: Array<{ originalText: string; translatedText: string }>; wasRateLimited: boolean }> {
+    const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
       const imageDescriptions = cropDataUrls
         .map((_, i) => `[Image ${i + 1} - ${bubbleTypes[i] ?? "speech"}]`)
         .join(", ");
@@ -458,7 +417,7 @@ If no text is found, return: []`;
             return parsed.map((item: any) => ({
               originalText: item.originalText || "",
               translatedText: item.translatedText || "",
-            }));
+            })) as Array<{ originalText: string; translatedText: string }>;
           }
         }
       } catch {
@@ -467,13 +426,14 @@ If no text is found, return: []`;
 
       return cropDataUrls.map(() => ({ originalText: "", translatedText: "" }));
     });
+    return { translations: value, wasRateLimited };
   }
 
   async extractAndTranslateFromCrops(
     cropDataUrls: string[],
     bubbleTypes: string[],
     targetLang: string = "en",
-  ): Promise<Array<{ originalText: string; translatedText: string }>> {
+  ): Promise<{ translations: Array<{ originalText: string; translatedText: string }>; wasRateLimited: boolean }> {
     if (!this.model) {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
@@ -483,14 +443,16 @@ If no text is found, return: []`;
       return this.extractAndTranslateChunk(cropDataUrls, bubbleTypes, targetLang);
     }
 
-    const results: Array<{ originalText: string; translatedText: string }> = [];
+    const translations: Array<{ originalText: string; translatedText: string }> = [];
+    let anyRateLimited = false;
     for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {
       const urlChunk = cropDataUrls.slice(i, i + CHUNK_SIZE);
       const typeChunk = bubbleTypes.slice(i, i + CHUNK_SIZE);
-      const chunkResults = await this.extractAndTranslateChunk(urlChunk, typeChunk, targetLang);
-      results.push(...chunkResults);
+      const chunk = await this.extractAndTranslateChunk(urlChunk, typeChunk, targetLang);
+      translations.push(...chunk.translations);
+      if (chunk.wasRateLimited) anyRateLimited = true;
     }
-    return results;
+    return { translations, wasRateLimited: anyRateLimited };
   }
 
   async batchTranslate(
