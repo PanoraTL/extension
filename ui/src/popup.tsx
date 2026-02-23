@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Toaster, toast } from "sonner";
 import "~/style.css";
 import logoSrc from "~/assets/orangesquare.png";
 import type {
@@ -53,9 +54,19 @@ const FEATURES = [
 function IndexPopup() {
   const { data: session, isPending: authLoading } = authClient.useSession();
 
+  const showErrorToast = (title: string, description?: string) => {
+    toast.custom((t) => (
+      <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #C15F3C", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
+        <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#C15F3C", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "#C15F3C" }}>{title}</div>
+        {description && <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{description}</div>}
+      </div>
+    ), { duration: 6000 });
+  };
+
   const [status, setStatus] = useState<TranslationStatus>("idle");
+  const statusRef = useRef<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<TranslationSettings>({
     autoDetectLanguage: true,
@@ -98,10 +109,29 @@ function IndexPopup() {
     const handleMessage = (message: any) => {
       if (message.action === "PROGRESS_UPDATE") {
         setProgress({ current: message.current, total: message.total });
-        setStatus(message.status || "processing");
+        const newStatus = message.status || "processing";
+        const prevStatus = statusRef.current;
+        statusRef.current = newStatus;
+        setStatus(newStatus);
+        if (newStatus === "complete" && prevStatus !== "complete") {
+          toast.custom((t) => (
+            <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #4CAF50", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
+              <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#4CAF50", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "#4CAF50" }}>Translation complete!</div>
+              <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{message.total} panel{message.total !== 1 ? "s" : ""} translated</div>
+            </div>
+          ), { duration: 4000 });
+          statusRef.current = "idle";
+          setStatus("idle");
+          setProgress({ current: 0, total: 0 });
+        }
       } else if (message.action === "ERROR") {
-        setError(message.error);
-        setStatus("error");
+        if (statusRef.current !== "idle") {
+          showErrorToast("Translation failed", message.error || undefined);
+        }
+        statusRef.current = "idle";
+        setStatus("idle");
+        setProgress({ current: 0, total: 0 });
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -123,11 +153,9 @@ function IndexPopup() {
 
   const handleStartTranslation = async () => {
     if (!apiKey.trim()) {
-      setError("No Gemini API key set. Add your key in Settings.");
-      setStatus("error");
+      showErrorToast("No API key set", "Add your Gemini API key in Settings.");
       return;
     }
-    setError(null);
     setProgress({ current: 0, total: 0 });
     setStatus("processing");
     try {
@@ -136,8 +164,8 @@ function IndexPopup() {
         currentWindow: true,
       });
       if (!tab.id) {
-        setError("No active tab found");
-        setStatus("error");
+        showErrorToast("No active tab found");
+        setStatus("idle");
         return;
       }
       chrome.tabs.sendMessage(
@@ -145,14 +173,14 @@ function IndexPopup() {
         { action: "START_TRANSLATION", mode: "auto", settings: savedSettings },
         () => {
           if (chrome.runtime.lastError) {
-            setError(chrome.runtime.lastError.message || "Unexpected error");
-            setStatus("error");
+            showErrorToast("Unexpected error", chrome.runtime.lastError.message);
+            setStatus("idle");
           }
         },
       );
     } catch (err: any) {
-      setError(err.message || "Failed to start translation");
-      setStatus("error");
+      showErrorToast("Failed to start translation", err.message);
+      setStatus("idle");
     }
   };
 
@@ -226,6 +254,8 @@ function IndexPopup() {
   }
 
   return (
+    <>
+    <Toaster position="top-center" />
     <div
       style={{
         width: "400px",
@@ -1367,53 +1397,9 @@ function IndexPopup() {
           </div>
         )}
 
-        
-        {status !== "idle" && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "8px 12px",
-              borderRadius: "8px",
-              background:
-                status === "error"
-                  ? "rgba(193, 95, 60, 0.08)"
-                  : status === "complete"
-                    ? "rgba(76, 175, 80, 0.08)"
-                    : "transparent",
-            }}
-          >
-            {status === "processing" && (
-              <span style={{ fontSize: "12px", color: "#D4775A" }}>
-                <span
-                  style={{
-                    display: "inline-block",
-                    animation: "spin 1s linear infinite",
-                    marginRight: "6px",
-                  }}
-                >
-                  ⟳
-                </span>
-                Translating manga panels...
-              </span>
-            )}
-            {status === "complete" && (
-              <span
-                style={{ fontSize: "12px", color: "#4CAF50", fontWeight: 500 }}
-              >
-                Translation complete!
-              </span>
-            )}
-            {status === "error" && error && (
-              <span
-                style={{ fontSize: "12px", color: "#C15F3C", fontWeight: 500 }}
-              >
-                {error}
-              </span>
-            )}
-          </div>
-        )}
       </div>
     </div>
+    </>
   );
 }
 

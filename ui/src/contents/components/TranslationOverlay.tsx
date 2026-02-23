@@ -88,16 +88,10 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
     const ro = new ResizeObserver(sync);
     ro.observe(imageElement);
 
-    const io = new IntersectionObserver(sync, { threshold: 0 });
-    io.observe(imageElement);
-
-    window.addEventListener("scroll", sync, { passive: true });
     window.addEventListener("resize", sync, { passive: true });
 
     return () => {
       ro.disconnect();
-      io.disconnect();
-      window.removeEventListener("scroll", sync);
       window.removeEventListener("resize", sync);
     };
   }, [imageElement, container]);
@@ -128,81 +122,20 @@ const getFontFamily = (style?: string): string => {
         if (visW <= 0 || visH <= 0) return null;
         if ((visW * visH) / (bw * bh) < 0.5) return null;
 
-        const clippedLeft = bx < 0;
-        const clippedTop = by < 0;
-        const clippedRight = bx + bw > 100;
-        const clippedBottom = by + bh > 100;
-        const isPartial = clippedLeft || clippedTop || clippedRight || clippedBottom;
-
         const fontFamily = getFontFamily(region.detectedFontStyle);
-        const fontWeight = region.detectedFontStyle === "bold" ? "bold" : "700";
+        const fontWeight = region.detectedFontStyle === "bold" ? "bold" : "600";
 
-        const bubbleType = region.bubbleType ?? "speech";
+        const isFreeText = region.bubbleType === "text_free";
 
-        let maskW: number, maskH: number, left: number, top: number, borderRadius: string, padding: string, alignItems: string;
+        const maskW = visW;
+        const maskH = visH;
+        const left = visX;
+        const top = visY;
+        const borderRadius = isFreeText ? "2px" : "4px";
 
-        if (!isPartial) {
-          const INSET = 0.06;
-          maskW = bw * (1 - INSET * 2);
-          maskH = bh * (1 - INSET * 2);
-          left = bx + bw / 2 - maskW / 2;
-          top = by + bh / 2 - maskH / 2;
-
-          const wPx = (maskW / 100) * imgW;
-          const hPx = (maskH / 100) * imgH;
-          const shortSide = Math.min(wPx, hPx);
-          const r = bubbleType === "narration" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
-          borderRadius = `${r}px`;
-          padding = "4%";
-          alignItems = "center";
-        } else {
-          const INSET = 0.06;
-          maskW = visW * (1 - INSET * 2);
-          maskH = visH * (1 - INSET * 2);
-          left = visX + visW / 2 - maskW / 2;
-
-          if (clippedTop && !clippedBottom) {
-            top = 0;
-          } else if (clippedBottom && !clippedTop) {
-            top = 100 - maskH;
-          } else {
-            top = visY + visH / 2 - maskH / 2;
-          }
-
-          const wPx = (maskW / 100) * imgW;
-          const hPx = (maskH / 100) * imgH;
-          const shortSide = Math.min(wPx, hPx);
-          const baseR = bubbleType === "narration" ? Math.round(shortSide * 0.08) : bubbleType === "tall" ? Math.round(shortSide * 0.35) : Math.round(shortSide * 0.46);
-          const flat = Math.round(baseR * 0.15);
-          const tl = clippedLeft || clippedTop ? flat : baseR;
-          const tr = clippedRight || clippedTop ? flat : baseR;
-          const br = clippedRight || clippedBottom ? flat : baseR;
-          const bl = clippedLeft || clippedBottom ? flat : baseR;
-          borderRadius = `${tl}px ${tr}px ${br}px ${bl}px`;
-          if (clippedTop && !clippedBottom) {
-            padding = "0 2% 4% 2%";
-            alignItems = "flex-start";
-          } else if (clippedBottom && !clippedTop) {
-            padding = "4% 2% 0 2%";
-            alignItems = "flex-end";
-          } else {
-            padding = "2%";
-            alignItems = "center";
-          }
-        }
-
-        const wPxFinal = (maskW / 100) * imgW;
-        const hPxFinal = (maskH / 100) * imgH;
-        const shortSideFinal = Math.min(wPxFinal, hPxFinal);
-
-        let fontSize: number;
-        const textLen = region.translatedText.length;
-        const areaFactor = Math.max(1, Math.sqrt(textLen / 3));
-        if (region.detectedFontSizePct && region.detectedFontSizePct > 0) {
-          fontSize = Math.max(8, Math.min((region.detectedFontSizePct / 100) * imgH * 0.65, 26));
-        } else {
-          fontSize = Math.max(8, Math.min(shortSideFinal * 0.18 / areaFactor, 26));
-        }
+        const boxWPx = (maskW / 100) * imgW;
+        const boxHPx = (maskH / 100) * imgH;
+        const fontSize = Math.max(10, Math.min(boxHPx * 0.28, boxWPx * 0.09, 18));
 
         return (
           <div
@@ -216,45 +149,34 @@ const getFontFamily = (style?: string): string => {
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
+              backgroundColor: isFreeText ? "transparent" : "#FFFFFF",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxSizing: "border-box",
             }}
           >
-            <div
+            <span
               style={{
-                position: "absolute",
-                inset: 0,
-                borderRadius,
-                backgroundColor: "#FFFFFF",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems,
-                justifyContent: "center",
-                padding,
+                fontFamily,
+                fontSize: `${fontSize}px`,
+                fontWeight,
+                color: isFreeText ? "#FFFFFF" : "#111111",
+                textShadow: isFreeText
+                  ? "0 0 3px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000"
+                  : "none",
+                textAlign: "center",
+                wordBreak: "break-word",
+                overflowWrap: "break-word",
+                lineHeight: "1.25",
+                maxWidth: "100%",
+                display: "block",
+                padding: "2px 4px",
                 boxSizing: "border-box",
               }}
             >
-              <span
-                style={{
-                  fontFamily,
-                  fontSize: `${fontSize}px`,
-                  fontWeight,
-                  color: "#111111",
-                  textShadow: "0 0 4px rgba(255,255,255,0.8)",
-                  textAlign: "center",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
-                  lineHeight: "1.25",
-                  maxWidth: "100%",
-                  display: "block",
-                }}
-              >
-                {region.translatedText}
-              </span>
-            </div>
+              {region.translatedText}
+            </span>
           </div>
         );
       })}

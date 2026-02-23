@@ -108,6 +108,19 @@ export class GeminiService {
     }
   }
 
+  isRateLimit(error: any): boolean {
+    const msg = (error.message || "").toLowerCase();
+    const status = error.status || error.statusCode || 0;
+    return (
+      status === 429 ||
+      msg.includes("429") ||
+      msg.includes("rate limit") ||
+      msg.includes("quota") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("resource exhausted")
+    );
+  }
+
   private isRetryable(error: any): boolean {
     const msg = (error.message || "").toLowerCase();
     const status = error.status || error.statusCode || 0;
@@ -184,50 +197,50 @@ export class GeminiService {
 
   private async retryWithBackoff<T>(
     fn: () => Promise<T>,
-    maxRetries: number = 5,
-    initialDelay: number = 1000,
   ): Promise<T> {
-    let lastError: any;
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (error: any) {
-        lastError = error;
-
-        if (this.isRetryable(error)) {
-          const msg = (error.message || "").toLowerCase();
-          const isRateLimit =
-            msg.includes("429") ||
-            msg.includes("rate limit") ||
-            msg.includes("resource_exhausted") ||
-            msg.includes("resource exhausted") ||
-            msg.includes("quota");
-
-          if (isRateLimit && !this.usingFallback) {
-            this.switchToFallback();
-            console.log(`[API] Retrying immediately with fallback model`);
-            continue;
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (this.isRateLimit(error)) {
+        if (!this.usingFallback) {
+          this.switchToFallback();
+          console.log(`[API] Rate limit on primary model, retrying once with fallback`);
+          try {
+            return await fn();
+          } catch (fallbackError: any) {
+            const userError = new Error(this.getUserFacingError(fallbackError));
+            (userError as any).cause = fallbackError;
+            (userError as any).isRateLimit = true;
+            console.error("[API] Rate limit on fallback model, stopping");
+            throw userError;
           }
+        }
+        const userError = new Error(this.getUserFacingError(error));
+        (userError as any).cause = error;
+        (userError as any).isRateLimit = true;
+        console.error("[API] Rate limit hit, stopping");
+        throw userError;
+      }
 
-          const delay = this.getRetryDelay(error, i, initialDelay);
-          console.log(
-            `[API] Retry ${i + 1}/${maxRetries} after ${delay}ms due to: ${error.message}`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        } else {
-          const userError = new Error(this.getUserFacingError(error));
-          (userError as any).cause = error;
-          console.error("[API] Non-retryable error:", error.message);
+      if (this.isRetryable(error)) {
+        const delay = this.getRetryDelay(error, 0, 1000);
+        console.log(`[API] Retrying after ${delay}ms due to: ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        try {
+          return await fn();
+        } catch (retryError: any) {
+          const userError = new Error(this.getUserFacingError(retryError));
+          (userError as any).cause = retryError;
+          (userError as any).isRateLimit = this.isRateLimit(retryError);
           throw userError;
         }
       }
-    }
 
-    const userError = new Error(this.getUserFacingError(lastError));
-    (userError as any).cause = lastError;
-    console.error("[API] All retries exhausted:", lastError?.message);
-    throw userError;
+      const userError = new Error(this.getUserFacingError(error));
+      (userError as any).cause = error;
+      console.error("[API] Non-retryable error:", error.message);
+      throw userError;
+    }
   }
 
   async detectTextRegionsWithOCR(

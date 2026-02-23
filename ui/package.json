@@ -1,7 +1,7 @@
 {
   "name": "panora-extension",
   "displayName": "Panora",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Read any manga, in any language, instantly.",
   "author": "Rithvik",
   "license": "MIT",
@@ -19,7 +19,6 @@
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",
     "@google/generative-ai": "^0.21.0",
-    "@radix-ui/react-slot": "^1.1.1",
     "better-auth": "1.4.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -29,11 +28,13 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sharp": "^0.34.5",
+    "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.4.0",
+    "@plasmohq/parcel-resolver": "^0.14.2",
     "@types/chrome": "^0.0.278",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.17",

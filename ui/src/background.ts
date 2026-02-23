@@ -294,6 +294,7 @@ async function handleProcessImages(request: any, tabId?: number) {
   );
 
   for (let i = 0; i < images.length; i++) {
+
     const image = images[i];
 
     try {
@@ -358,6 +359,11 @@ async function handleProcessImages(request: any, tabId?: number) {
         `[BACKGROUND] Failed to process ${image.id}:`,
         error.message,
       );
+
+      if (error.isRateLimit || geminiService.isRateLimit(error)) {
+        const rateLimitMsg = error.message || "Gemini API rate limit reached. Please wait and try again.";
+        return { success: false, isRateLimit: true, error: rateLimitMsg };
+      }
 
       results.push({
         imageId: image.id,

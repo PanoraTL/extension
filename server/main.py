@@ -1,64 +1,50 @@
 import base64
 import io
+import logging
 import os
-import shutil
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("panora")
+
 import numpy as np
 import torch
-
-_original_torch_load = torch.load
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from huggingface_hub import hf_hub_download
 from PIL import Image
 from pydantic import BaseModel
-from ultralytics import YOLO
-from ultralytics.nn.modules.head import Detect, Segment
+from transformers import AutoModelForObjectDetection, AutoProcessor
 
-def _segment_forward_patched(self, x):
-    p = self.proto(x[0])
-    bs = p.shape[0]
-    mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)
-    x = Detect.forward(self, x)
-    if self.training:
-        return x, mc, p
-    return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+MODEL_CACHE_DIR = os.path.expanduser("~/.cache/panora/rtdetr_model")
+HF_REPO_ID = "ogkalu/comic-text-and-bubble-detector"
 
-Segment.forward = _segment_forward_patched
+LABEL_BUBBLE = 0
+LABEL_TEXT_BUBBLE = 1
+LABEL_TEXT_FREE = 2
 
-MODEL_CACHE_DIR = os.path.expanduser("~/.cache/panora")
-MODEL_CACHE_PATH = os.path.join(MODEL_CACHE_DIR, "model.pt")
-HF_REPO_ID = "kitsumed/yolov8m_seg-speech-bubble"
-HF_FILENAME = "model.pt"
-
-yolo_model: Optional[YOLO] = None
+processor: Optional[AutoProcessor] = None
+rtdetr_model: Optional[AutoModelForObjectDetection] = None
 model_loaded = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global yolo_model, model_loaded
+    global processor, rtdetr_model, model_loaded
     try:
         os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
-        if not os.path.exists(MODEL_CACHE_PATH):
-            downloaded = hf_hub_download(repo_id=HF_REPO_ID, filename=HF_FILENAME)
-            shutil.copy(downloaded, MODEL_CACHE_PATH)
-        torch.load = lambda *a, **kw: _original_torch_load(*a, **{**kw, "weights_only": False})
-        try:
-            yolo_model = YOLO(MODEL_CACHE_PATH)
-        finally:
-            torch.load = _original_torch_load
+        processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
+        rtdetr_model = AutoModelForObjectDetection.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
+        rtdetr_model.eval()
         model_loaded = True
     except Exception as e:
-        print(f"Failed to load model: {e}")
+        logger.error(f"Failed to load model: {e}")
         model_loaded = False
     yield
 
 
-app = FastAPI(title="Panora YOLO Bubble Detector", lifespan=lifespan)
+app = FastAPI(title="Panora RT-DETR Bubble Detector", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +120,9 @@ def sample_background_color(crop: Image.Image) -> str:
         return "#FFFFFF"
 
 
-def classify_bubble_type(box_w: float, box_h: float) -> str:
+def classify_bubble_type(box_w: float, box_h: float, is_free: bool = False) -> str:
+    if is_free:
+        return "text_free"
     if box_w == 0 or box_h == 0:
         return "speech"
     aspect = box_w / box_h
@@ -145,6 +133,22 @@ def classify_bubble_type(box_w: float, box_h: float) -> str:
     return "speech"
 
 
+def compute_iou(a: list, b: list) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    area_a = (ax2 - ax1) * (ay2 - ay1)
+    area_b = (bx2 - bx1) * (by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "model_loaded": model_loaded}
@@ -152,7 +156,7 @@ async def health():
 
 @app.post("/detect-bubbles", response_model=List[BubbleResult])
 async def detect_bubbles(request: DetectRequest):
-    if not model_loaded or yolo_model is None:
+    if not model_loaded or rtdetr_model is None or processor is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
 
     try:
@@ -163,87 +167,133 @@ async def detect_bubbles(request: DetectRequest):
     img_w, img_h = pil_image.size
 
     try:
-        results = yolo_model(pil_image, conf=0.25, iou=0.45, verbose=False)
+        inputs = processor(images=pil_image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = rtdetr_model(**inputs)
+        target_sizes = torch.tensor([pil_image.size[::-1]])
+        detections = processor.post_process_object_detection(
+            outputs, threshold=0.25, target_sizes=target_sizes
+        )[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"YOLO inference failed: {e}")
+        raise HTTPException(status_code=500, detail=f"RT-DETR inference failed: {e}")
 
-    bubbles: List[BubbleResult] = []
+    boxes = detections["boxes"].tolist()
+    scores = detections["scores"].tolist()
+    labels = detections["labels"].tolist()
 
-    if not results or len(results) == 0:
-        return bubbles
+    label_names = {LABEL_BUBBLE: "bubble", LABEL_TEXT_BUBBLE: "text_bubble", LABEL_TEXT_FREE: "text_free"}
+    logger.info(f"[DETECT] image={img_w}x{img_h}, detections={len(boxes)}")
+    if logger.isEnabledFor(logging.DEBUG):
+        for box, score, label in zip(boxes, scores, labels):
+            x1, y1, x2, y2 = box
+            logger.debug(f"  {label_names.get(label, label)} score={score:.2f} box=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}) pct=({x1/img_w*100:.1f}%,{y1/img_h*100:.1f}%,{(x2-x1)/img_w*100:.1f}%w,{(y2-y1)/img_h*100:.1f}%h)")
 
-    result = results[0]
+    bubble_list = []
+    text_bubble_list = []
+    text_free_list = []
 
-    if result.boxes is None or len(result.boxes) == 0:
-        return bubbles
+    for box, score, label in zip(boxes, scores, labels):
+        if label == LABEL_BUBBLE:
+            bubble_list.append((box, score))
+        elif label == LABEL_TEXT_BUBBLE:
+            text_bubble_list.append((box, score))
+        elif label == LABEL_TEXT_FREE:
+            text_free_list.append((box, score))
 
-    for box in result.boxes:
-        try:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            confidence = float(box.conf[0])
+    used_text_bubbles = set()
+    results: List[BubbleResult] = []
 
-            raw_w = x2 - x1
-            raw_h = y2 - y1
+    def make_result(overlay_box, confidence, is_free=False, clip_box=None):
+        x1, y1, x2, y2 = overlay_box
+        if clip_box is not None:
+            x1 = max(x1, clip_box[0])
+            y1 = max(y1, clip_box[1])
+            x2 = min(x2, clip_box[2])
+            y2 = min(y2, clip_box[3])
+        raw_w = x2 - x1
+        raw_h = y2 - y1
 
-            if raw_w < 5 or raw_h < 5:
+        if raw_w < 5 or raw_h < 5:
+            return None
+
+        cx1 = max(0, x1)
+        cy1 = max(0, y1)
+        cx2 = min(img_w, x2)
+        cy2 = min(img_h, y2)
+
+        visible_w = cx2 - cx1
+        visible_h = cy2 - cy1
+
+        if visible_w < 5 or visible_h < 5:
+            return None
+
+        visible_area = visible_w * visible_h
+        raw_area = raw_w * raw_h
+        if raw_area > 0 and visible_area / raw_area < 0.5:
+            return None
+
+        pct_x = (x1 / img_w) * 100
+        pct_y = (y1 / img_h) * 100
+        pct_w = (raw_w / img_w) * 100
+        pct_h = (raw_h / img_h) * 100
+
+        crop = pil_image.crop((int(cx1), int(cy1), int(cx2), int(cy2)))
+        crop_data_url = encode_crop(crop)
+        bg_color = sample_background_color(crop)
+        font_size_pct = round((raw_h / img_h) * 100 / 2.5, 2)
+        bubble_type = classify_bubble_type(raw_w, raw_h, is_free=is_free)
+
+        return BubbleResult(
+            bounds=BoundsSchema(
+                x=round(pct_x, 2),
+                y=round(pct_y, 2),
+                width=round(pct_w, 2),
+                height=round(pct_h, 2),
+            ),
+            cropDataUrl=crop_data_url,
+            background=BackgroundSchema(type="solid", color=bg_color, hasTexture=False),
+            detectedFontSizePct=font_size_pct,
+            confidence=round(confidence, 3),
+            bubbleType=bubble_type,
+        )
+
+    for bubble_box, bubble_score in bubble_list:
+        best_idx = None
+        best_iou = 0.0
+        for i, (tb_box, _) in enumerate(text_bubble_list):
+            if i in used_text_bubbles:
                 continue
+            iou = compute_iou(bubble_box, tb_box)
+            if iou > best_iou:
+                best_iou = iou
+                best_idx = i
 
-            cx1 = max(0, x1)
-            cy1 = max(0, y1)
-            cx2 = min(img_w, x2)
-            cy2 = min(img_h, y2)
+        if best_idx is not None and best_iou > 0.1:
+            used_text_bubbles.add(best_idx)
+            tb_box = text_bubble_list[best_idx][0]
+            result = make_result(tb_box, bubble_score, clip_box=bubble_box)
+            if result is not None:
+                results.append(result)
 
-            visible_w = cx2 - cx1
-            visible_h = cy2 - cy1
-
-            if visible_w < 5 or visible_h < 5:
-                continue
-
-            visible_area = visible_w * visible_h
-            raw_area = raw_w * raw_h
-            if raw_area > 0 and visible_area / raw_area < 0.5:
-                continue
-
-            pct_x = (x1 / img_w) * 100
-            pct_y = (y1 / img_h) * 100
-            pct_w = (raw_w / img_w) * 100
-            pct_h = (raw_h / img_h) * 100
-
-            crop = pil_image.crop((int(cx1), int(cy1), int(cx2), int(cy2)))
-            crop_data_url = encode_crop(crop)
-            bg_color = sample_background_color(crop)
-            font_size_pct = round((raw_h / img_h) * 100 / 3, 2)
-            bubble_type = classify_bubble_type(raw_w, raw_h)
-
-            bubbles.append(
-                BubbleResult(
-                    bounds=BoundsSchema(
-                        x=round(pct_x, 2),
-                        y=round(pct_y, 2),
-                        width=round(pct_w, 2),
-                        height=round(pct_h, 2),
-                    ),
-                    cropDataUrl=crop_data_url,
-                    background=BackgroundSchema(
-                        type="solid",
-                        color=bg_color,
-                        hasTexture=False,
-                    ),
-                    detectedFontSizePct=font_size_pct,
-                    confidence=round(confidence, 3),
-                    bubbleType=bubble_type,
-                )
-            )
-        except Exception as e:
-            try:
-                coords = box.xyxy[0].tolist()
-                conf = float(box.conf[0])
-                print(f"Failed to process box coords={coords} conf={conf:.3f}: {e}")
-            except Exception:
-                print(f"Failed to process box (coords unavailable): {e}")
+    for i, (tb_box, tb_score) in enumerate(text_bubble_list):
+        if i in used_text_bubbles:
             continue
+        bx1, by1, bx2, by2 = tb_box
+        bw = bx2 - bx1
+        bh = by2 - by1
+        inset_x = bw * 0.06
+        inset_y = bh * 0.04
+        clip = [bx1 + inset_x, by1 + inset_y, bx2 - inset_x, by2 - inset_y]
+        result = make_result(tb_box, tb_score, clip_box=clip)
+        if result is not None:
+            results.append(result)
 
-    return bubbles
+    for tf_box, tf_score in text_free_list:
+        result = make_result(tf_box, tf_score, is_free=True)
+        if result is not None:
+            results.append(result)
+
+    return results
 
 
 if __name__ == "__main__":
