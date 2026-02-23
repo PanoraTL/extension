@@ -218,16 +218,20 @@ async function detectBubblesViaPython(
     clearTimeout(timeout);
   }
 
+  const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
+
+  const translations = validBubbles.length > 0
+    ? await geminiService.extractAndTranslateFromCrops(
+        validBubbles.map((b) => b.cropDataUrl),
+        targetLang,
+      )
+    : [];
+
   const textRegions: TextRegion[] = [];
-
-  for (const bubble of bubbles) {
-    if (!bubble.cropDataUrl) continue;
-
-    const { originalText, translatedText } =
-      await geminiService.extractAndTranslateFromCrop(bubble.cropDataUrl, targetLang);
-
+  for (let i = 0; i < validBubbles.length; i++) {
+    const bubble = validBubbles[i];
+    const { originalText, translatedText } = translations[i] ?? { originalText: "", translatedText: "" };
     if (!originalText.trim() || !translatedText.trim()) continue;
-
     textRegions.push({
       originalText,
       translatedText,
@@ -240,7 +244,7 @@ async function detectBubblesViaPython(
     });
   }
 
-  console.log(`[BACKGROUND] YOLO returned ${textRegions.length} text bubbles`);
+  console.log(`[BACKGROUND] RT-DETR returned ${textRegions.length} text bubbles`);
   return textRegions;
 }
 

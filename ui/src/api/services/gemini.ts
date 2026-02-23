@@ -404,6 +404,46 @@ If no text is found, return: []`;
     });
   }
 
+  async extractAndTranslateFromCrops(
+    cropDataUrls: string[],
+    targetLang: string = "en",
+  ): Promise<Array<{ originalText: string; translatedText: string }>> {
+    if (!this.model) {
+      throw new Error("Gemini API not initialized. Please provide an API key.");
+    }
+
+    return this.retryWithBackoff(async () => {
+      const prompt = `You are given ${cropDataUrls.length} speech bubble image(s), provided in order. For each image extract all text and translate it to ${targetLang}. Return ONLY a valid JSON array with exactly ${cropDataUrls.length} objects in the same order as the images. Each object must have exactly two fields: "originalText" and "translatedText". If an image has no text, use empty strings. Example format: [{"originalText":"...","translatedText":"..."},{"originalText":"","translatedText":""}]`;
+
+      const parts: any[] = [prompt];
+      for (const dataUrl of cropDataUrls) {
+        parts.push({ inlineData: { data: dataUrl.split(",")[1], mimeType: "image/png" } });
+      }
+
+      const result = await this.getActiveModel().generateContent(parts);
+      const response = await result.response;
+      const text = response.text();
+
+      try {
+        const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item: any) => ({
+              originalText: item.originalText || "",
+              translatedText: item.translatedText || "",
+            }));
+          }
+        }
+      } catch {
+        // fall through to per-item fallback
+      }
+
+      return cropDataUrls.map(() => ({ originalText: "", translatedText: "" }));
+    });
+  }
+
   async batchTranslate(
     texts: string[],
     targetLang: string = "en",
