@@ -251,19 +251,25 @@ export class GeminiService {
       }
 
       if (this.isRetryable(error)) {
-        const delay = this.getRetryDelay(error, 0, 1000);
-        console.log(`[API] Retrying after ${delay}ms due to: ${error.message}`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        try {
-          const value = await fn();
-          return { value, wasRateLimited: false };
-        } catch (retryError: any) {
-          const userError = new Error(this.getUserFacingError(retryError));
-          (userError as any).cause = retryError;
-          (userError as any).isRateLimit = this.isRateLimit(retryError);
-          (userError as any).isOverloaded = this.isOverloaded(retryError);
-          throw userError;
+        const maxRetries = this.isOverloaded(error) ? 2 : 1;
+        let lastError: any = error;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          const delay = this.isOverloaded(lastError) ? 1000 : this.getRetryDelay(lastError, attempt, 1000);
+          console.log(`[API] Retrying (${attempt + 1}/${maxRetries}) after ${delay}ms due to: ${lastError.message}`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          try {
+            const value = await fn();
+            return { value, wasRateLimited: false };
+          } catch (retryError: any) {
+            lastError = retryError;
+            if (!this.isRetryable(retryError)) break;
+          }
         }
+        const userError = new Error(this.getUserFacingError(lastError));
+        (userError as any).cause = lastError;
+        (userError as any).isRateLimit = this.isRateLimit(lastError);
+        (userError as any).isOverloaded = this.isOverloaded(lastError);
+        throw userError;
       }
 
       const userError = new Error(this.getUserFacingError(error));
