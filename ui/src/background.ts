@@ -176,7 +176,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return false;
   }
-  // session cleanup is handled inside handleProcessImagesBatch when wasStopped is detected
 
   if (request.action === "UPDATE_API_KEY") {
     const newKey = request.apiKey?.trim();
@@ -215,15 +214,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
-async function detectBubblesViaModel(
-  imageDataUrl: string,
-  targetLang: string,
-): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
+async function detectBubbles(imageDataUrl: string): Promise<DetectedBubble[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
-
-  let bubbles: DetectedBubble[];
-
   try {
     const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
       method: "POST",
@@ -231,50 +224,30 @@ async function detectBubblesViaModel(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image_data: imageDataUrl }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Detection server returned ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`Detection server returned ${response.status}`);
     const data = await response.json();
-    bubbles = Array.isArray(data) ? data : [];
+    return (Array.isArray(data) ? data : []).filter((b: DetectedBubble) => !!b.cropDataUrl);
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
-
-  let translations: string[] = [];
-  let wasRateLimited = false;
-  if (validBubbles.length > 0) {
-    const result = await geminiService.extractAndTranslateFromCrops(
-      validBubbles.map((b) => b.cropDataUrl),
-      validBubbles.map((b) => b.bubbleType ?? "speech"),
-      targetLang,
-    );
-    translations = result.translations;
-    wasRateLimited = result.wasRateLimited;
-    const translated = translations.filter(t => !!t).length;
-    console.log(`[API] Gemini translation complete: ${translated}/${translations.length} bubbles translated`);
-  }
-
-  const textRegions: TextRegion[] = [];
-  for (let i = 0; i < validBubbles.length; i++) {
-    const bubble = validBubbles[i];
+function buildTextRegions(bubbles: DetectedBubble[], translations: string[]): TextRegion[] {
+  const regions: TextRegion[] = [];
+  for (let i = 0; i < bubbles.length; i++) {
     const translatedText = translations[i] ?? "";
     if (!translatedText.trim()) continue;
-    textRegions.push({
+    regions.push({
       translatedText,
-      bounds: bubble.bounds,
-      background: bubble.background,
-      detectedFontSizePct: bubble.detectedFontSizePct,
+      bounds: bubbles[i].bounds,
+      background: bubbles[i].background,
+      detectedFontSizePct: bubbles[i].detectedFontSizePct,
       detectedFontStyle: "normal",
-      confidence: bubble.confidence,
-      bubbleType: bubble.bubbleType,
+      confidence: bubbles[i].confidence,
+      bubbleType: bubbles[i].bubbleType,
     });
   }
-
-  return { regions: textRegions, wasRateLimited };
+  return regions;
 }
 
 async function handleFetchImage(url: string): Promise<string> {
@@ -337,11 +310,13 @@ async function handleProcessImages(request: any, tabId?: number) {
             );
           }
 
-          const { regions, wasRateLimited } = await detectBubblesViaModel(
-            image.dataUrl,
+          const bubbles = await detectBubbles(image.dataUrl);
+          const result = await geminiService.extractAndTranslateFromCrops(
+            bubbles.map((b) => b.cropDataUrl),
+            bubbles.map((b) => b.bubbleType ?? "speech"),
             settings.targetLanguage,
           );
-          return { textRegions: regions, wasRateLimited };
+          return { textRegions: buildTextRegions(bubbles, result.translations), wasRateLimited: result.wasRateLimited };
         });
 
         await cache.set(imageHash, settings.targetLanguage, textRegions.textRegions);
@@ -409,30 +384,24 @@ async function processSinglePanel(
   image: { id: string; dataUrl: string },
   settings: any,
   isAborted: () => boolean = () => false,
-): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; fromCache: boolean; error: string | null }> {
+): Promise<{ bubbles: DetectedBubble[]; isRateLimit?: boolean; imageHash: string; error: string | null }> {
   await initPromise;
-  if (isAborted()) return { textRegions: [], wasRateLimited: false, isRateLimit: false, fromCache: false, error: null };
+  if (isAborted()) return { bubbles: [], imageHash: "", error: null };
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
-  const cached = await cache.get(imageHash, settings.targetLanguage);
-  if (cached) {
-    return { textRegions: cached, wasRateLimited: false, isRateLimit: false, fromCache: true, error: null };
-  }
 
   try {
-    const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
-      if (isAborted()) return { textRegions: [], wasRateLimited: false };
+    const bubbles = await requestQueue.add(async () => {
+      if (isAborted()) return [];
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
-      const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
-      return { textRegions: regions, wasRateLimited };
+      return detectBubbles(image.dataUrl);
     });
-    await cache.set(imageHash, settings.targetLanguage, textRegions);
-    return { textRegions: textRegions || [], wasRateLimited, isRateLimit: false, fromCache: false, error: null };
+    return { bubbles: bubbles || [], imageHash, error: null };
   } catch (error: any) {
     const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
     const isOverloaded = !!(error.isOverloaded || geminiService.isOverloaded(error));
-    return { textRegions: [], wasRateLimited: false, isRateLimit: isRateLimit || isOverloaded, fromCache: false, error: error.message || "Processing failed" };
+    return { bubbles: [], imageHash, isRateLimit: isRateLimit || isOverloaded, error: error.message || "Processing failed" };
   }
 }
 
@@ -453,32 +422,83 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   const isAborted = () => tabId !== undefined && batchAbortedByTab.get(tabId) === true;
 
-  await Promise.allSettled(
+  const detectionResults = await Promise.all(
     images.map(async (image: { id: string; dataUrl: string }) => {
-      if (isAborted()) return;
-
-      const result = await processSinglePanel(image, settings, isAborted);
-
-      if (isAborted()) return;
-
-      completed++;
-
-      if (result.isRateLimit) {
-        rateLimitHit = true;
-        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
-        sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
-      } else {
-        if (result.textRegions.length > 0) anySuccess = true;
-        if (result.wasRateLimited) anyRateLimited = true;
-        if (result.fromCache && tabId !== undefined && sessionStatsByTab.has(tabId)) {
-          sessionStatsByTab.get(tabId)!.cachedPanels++;
-        }
-        sendToTab({ action: "PANEL_RESULT", imageId: image.id, textRegions: result.textRegions, wasRateLimited: result.wasRateLimited });
-      }
-
-      sendToPopup({ action: "PROGRESS_UPDATE", current: completed, total, status: "processing" });
+      if (isAborted()) return { image, bubbles: [], fromCache: false, imageHash: "", cached: null as TextRegion[] | null, isRateLimit: false, error: null as string | null };
+      const imageHash = await TranslationCache.hashImage(image.dataUrl);
+      const cached = await cache.get(imageHash, settings.targetLanguage);
+      if (cached) return { image, bubbles: [] as DetectedBubble[], fromCache: true, imageHash, cached, isRateLimit: false, error: null as string | null };
+      const det = await processSinglePanel(image, settings, isAborted);
+      return { image, bubbles: det.bubbles, fromCache: false, imageHash, cached: null as TextRegion[] | null, isRateLimit: det.isRateLimit ?? false, error: det.error };
     })
   );
+
+  if (isAborted()) {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: false, total: completed, stopped: true, isFinal: true });
+    sendToPopup({ action: "TRANSLATION_STOPPED" });
+    return;
+  }
+
+  const panelCropOffsets: { image: { id: string; dataUrl: string }; start: number; count: number; imageHash: string }[] = [];
+  const allCrops: string[] = [];
+  const allTypes: string[] = [];
+
+  for (const det of detectionResults) {
+    if (det.fromCache || det.isRateLimit || det.bubbles.length === 0) continue;
+    const start = allCrops.length;
+    allCrops.push(...det.bubbles.map((b) => b.cropDataUrl));
+    allTypes.push(...det.bubbles.map((b) => b.bubbleType ?? "speech"));
+    panelCropOffsets.push({ image: det.image, start, count: det.bubbles.length, imageHash: det.imageHash });
+  }
+
+  let allTranslations: string[] = [];
+  let wasRateLimited = false;
+  if (allCrops.length > 0) {
+    try {
+      const result = await geminiService.extractAndTranslateFromCrops(allCrops, allTypes, settings.targetLanguage);
+      allTranslations = result.translations;
+      wasRateLimited = result.wasRateLimited;
+      const translated = allTranslations.filter(t => !!t).length;
+      console.log(`[API] Gemini translation complete: ${translated}/${allTranslations.length} bubbles translated`);
+    } catch (error: any) {
+      const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
+      if (isRateLimit) {
+        rateLimitHit = true;
+        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+      }
+    }
+  }
+
+  for (const det of detectionResults) {
+    if (isAborted()) break;
+    completed++;
+
+    if (det.isRateLimit) {
+      rateLimitHit = true;
+      if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+      sendToTab({ action: "PANEL_ERROR", imageId: det.image.id, isRateLimit: true, error: det.error });
+    } else if (det.fromCache && det.cached) {
+      anySuccess = true;
+      if (tabId !== undefined && sessionStatsByTab.has(tabId)) {
+        sessionStatsByTab.get(tabId)!.cachedPanels++;
+      }
+      sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions: det.cached, wasRateLimited: false });
+    } else {
+      const offset = panelCropOffsets.find(p => p.image.id === det.image.id);
+      const translations = offset ? allTranslations.slice(offset.start, offset.start + offset.count) : [];
+      const bubbles = detectionResults.find(d => d.image.id === det.image.id)?.bubbles ?? [];
+      const textRegions = buildTextRegions(bubbles, translations);
+      await cache.set(det.imageHash, settings.targetLanguage, textRegions);
+      if (textRegions.length > 0) anySuccess = true;
+      if (wasRateLimited) anyRateLimited = true;
+      sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions, wasRateLimited });
+    }
+
+    const session = tabId !== undefined ? sessionStatsByTab.get(tabId) : undefined;
+    const globalCompleted = session ? session.completedPanels + completed : completed;
+    const globalTotal = session ? session.totalPanels : total;
+    sendToPopup({ action: "PROGRESS_UPDATE", current: globalCompleted, total: globalTotal, status: "processing" });
+  }
 
   const wasStopped = isAborted();
 

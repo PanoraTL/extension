@@ -341,11 +341,7 @@ export class GeminiService {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
 
-    const CHUNK_SIZE = 16;
-    if (cropDataUrls.length <= CHUNK_SIZE) {
-      return this.extractAndTranslateChunk(cropDataUrls, bubbleTypes, targetLang);
-    }
-
+    const CHUNK_SIZE = 6;
     const translations: string[] = [];
     let anyRateLimited = false;
     for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {

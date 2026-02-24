@@ -1,7 +1,9 @@
+import asyncio
 import base64
 import io
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -34,6 +36,7 @@ LABEL_TEXT_FREE = 2
 processor: Optional[AutoProcessor] = None
 rtdetr_model: Optional[AutoModelForObjectDetection] = None
 model_loaded = False
+thread_pool = ThreadPoolExecutor(max_workers=10)
 
 
 @asynccontextmanager
@@ -41,7 +44,7 @@ async def lifespan(app: FastAPI):
     global processor, rtdetr_model, model_loaded
     try:
         os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
-        processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
+        processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR, use_fast=True)
         rtdetr_model = AutoModelForObjectDetection.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
         rtdetr_model = rtdetr_model.to(DEVICE)
         rtdetr_model.eval()
@@ -175,15 +178,19 @@ async def detect_bubbles(request: DetectRequest):
 
     img_w, img_h = pil_image.size
 
-    try:
+    def run_inference():
         inputs = processor(images=pil_image, return_tensors="pt")
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = rtdetr_model(**inputs)
         target_sizes = torch.tensor([pil_image.size[::-1]]).to(DEVICE)
-        detections = processor.post_process_object_detection(
+        return processor.post_process_object_detection(
             outputs, threshold=0.23, target_sizes=target_sizes
         )[0]
+
+    try:
+        loop = asyncio.get_event_loop()
+        detections = await loop.run_in_executor(thread_pool, run_inference)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RT-DETR inference failed: {e}")
 
