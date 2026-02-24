@@ -9,6 +9,8 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("panora")
 
+import platform
+
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
@@ -19,6 +21,11 @@ from transformers import AutoModelForObjectDetection, AutoProcessor
 
 MODEL_CACHE_DIR = os.path.expanduser("~/.cache/panora/rtdetr_model")
 HF_REPO_ID = "ogkalu/comic-text-and-bubble-detector"
+
+if platform.system() == "Darwin" and torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
 
 LABEL_BUBBLE = 0
 LABEL_TEXT_BUBBLE = 1
@@ -36,7 +43,9 @@ async def lifespan(app: FastAPI):
         os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
         processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
         rtdetr_model = AutoModelForObjectDetection.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
+        rtdetr_model = rtdetr_model.to(DEVICE)
         rtdetr_model.eval()
+        logger.info(f"Model loaded on device: {DEVICE}")
         model_loaded = True
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
@@ -151,7 +160,7 @@ def compute_iou(a: list, b: list) -> float:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model_loaded": model_loaded}
+    return {"status": "ok", "model_loaded": model_loaded, "device": str(DEVICE)}
 
 
 @app.post("/detect-bubbles", response_model=List[BubbleResult])
@@ -168,9 +177,10 @@ async def detect_bubbles(request: DetectRequest):
 
     try:
         inputs = processor(images=pil_image, return_tensors="pt")
+        inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = rtdetr_model(**inputs)
-        target_sizes = torch.tensor([pil_image.size[::-1]])
+        target_sizes = torch.tensor([pil_image.size[::-1]]).to(DEVICE)
         detections = processor.post_process_object_detection(
             outputs, threshold=0.25, target_sizes=target_sizes
         )[0]
