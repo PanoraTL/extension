@@ -301,7 +301,6 @@ async function detectBubblesViaModel(
   for (let i = 0; i < validBubbles.length; i++) {
     const bubble = validBubbles[i];
     const { originalText, translatedText } = translations[i] ?? { originalText: "", translatedText: "" };
-    if (!originalText.trim() || !translatedText.trim()) continue;
     textRegions.push({
       originalText,
       translatedText,
