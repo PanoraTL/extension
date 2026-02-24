@@ -9,6 +9,17 @@ let detectorConsecutiveFailures = 0;
 const DETECTOR_MAX_FAILURES = 3;
 const batchAbortedByTab = new Map<number, boolean>();
 
+interface SessionStats {
+  startTime: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalPanels: number;
+  completedPanels: number;
+  chunksDone: number;
+  totalChunks: number;
+}
+const sessionStatsByTab = new Map<number, SessionStats>();
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
 });
@@ -129,7 +140,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "PROCESS_IMAGES_BATCH") {
     const tabId = sender.tab?.id;
-    if (tabId !== undefined) batchAbortedByTab.set(tabId, false);
+    if (tabId !== undefined) {
+      batchAbortedByTab.set(tabId, false);
+      if (!sessionStatsByTab.has(tabId)) {
+        geminiService.resetTokenCount();
+        sessionStatsByTab.set(tabId, {
+          startTime: Date.now(),
+          inputTokens: 0,
+          outputTokens: 0,
+          totalPanels: request.total,
+          completedPanels: 0,
+          chunksDone: 0,
+          totalChunks: Math.ceil(request.total / request.images.length),
+        });
+      }
+    }
     sendResponse({ success: true });
     handleProcessImagesBatch(request, tabId);
     return false;
@@ -141,6 +166,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
     return false;
   }
+  // session cleanup is handled inside handleProcessImagesBatch when wasStopped is detected
 
   if (request.action === "UPDATE_API_KEY") {
     const newKey = request.apiKey?.trim();
@@ -479,7 +505,6 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   let anyRateLimited = false;
   let anySuccess = false;
   let rateLimitHit = false;
-  const startTime = Date.now();
 
   console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
 
@@ -516,13 +541,25 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     })
   );
 
-  const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
-  const inputTokens = geminiService.totalInputTokens;
-  const outputTokens = geminiService.totalOutputTokens;
-  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | tokens — input: ${inputTokens}, output: ${outputTokens}, total: ${inputTokens + outputTokens}`);
-  geminiService.resetTokenCount();
-
   const wasStopped = isAborted();
+
+  if (tabId !== undefined && sessionStatsByTab.has(tabId)) {
+    const session = sessionStatsByTab.get(tabId)!;
+    session.completedPanels += completed;
+    session.chunksDone++;
+    session.inputTokens += geminiService.totalInputTokens;
+    session.outputTokens += geminiService.totalOutputTokens;
+    geminiService.resetTokenCount();
+
+    const isLastChunk = wasStopped || rateLimitHit || session.completedPanels >= session.totalPanels;
+    if (isLastChunk) {
+      const elapsedSec = ((Date.now() - session.startTime) / 1000).toFixed(1);
+      console.log(`[BACKGROUND] Translation complete: ${session.completedPanels}/${session.totalPanels} panels | ${elapsedSec}s total | tokens — input: ${session.inputTokens}, output: ${session.outputTokens}, total: ${session.inputTokens + session.outputTokens}`);
+      sessionStatsByTab.delete(tabId);
+    }
+  } else {
+    geminiService.resetTokenCount();
+  }
   if (tabId !== undefined) batchAbortedByTab.delete(tabId);
 
   if (wasStopped && !rateLimitHit) {
