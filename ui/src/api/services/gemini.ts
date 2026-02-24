@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { TextRegion } from "~/types/translator.types";
 
 const PRIMARY_MODEL = "gemini-2.5-flash-lite";
 const FALLBACK_MODEL = "gemini-2.5-flash";
@@ -303,24 +302,25 @@ export class GeminiService {
       this.accumulateTokens(result);
       const response = await result.response;
       const text = response.text();
-      console.log("[API] Gemini raw response:", text);
 
       try {
         const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const normalize = (s: string) => {
-          const t = s.trim();
-          const wrapped = t.startsWith("[") ? t : `[${t}`;
-          return wrapped.endsWith("]") ? wrapped : `${wrapped}]`;
-        };
-        const raw = cleaned.match(/\[[\s\S]*/);
-        if (raw) {
-          const parsed = JSON.parse(normalize(raw[0]));
-          if (Array.isArray(parsed)) {
-            const results = parsed.map((item: any) => (typeof item === "string" ? item : ""));
-            const emptyCount = results.filter(r => !r).length;
-            if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops had no text`);
-            return results;
-          }
+        const firstBracket = cleaned.indexOf("[");
+        const lastBracket = cleaned.lastIndexOf("]");
+        let toParse: string;
+        if (firstBracket !== -1 && lastBracket > firstBracket) {
+          toParse = cleaned.slice(firstBracket, lastBracket + 1);
+        } else if (firstBracket !== -1) {
+          toParse = cleaned.slice(firstBracket) + "]";
+        } else {
+          toParse = `[${cleaned}]`;
+        }
+        const parsed = JSON.parse(toParse);
+        if (Array.isArray(parsed)) {
+          const results = parsed.map((item: any) => (typeof item === "string" ? item : ""));
+          const emptyCount = results.filter((r: string) => !r).length;
+          if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops had no text`);
+          return results;
         }
       } catch {
         // fall through to per-item fallback

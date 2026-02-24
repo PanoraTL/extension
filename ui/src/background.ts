@@ -382,7 +382,7 @@ async function handleProcessImages(request: any, tabId?: number) {
 
 async function processSinglePanel(
   image: { id: string; dataUrl: string },
-  settings: any,
+  _settings: any,
   isAborted: () => boolean = () => false,
 ): Promise<{ bubbles: DetectedBubble[]; isRateLimit?: boolean; imageHash: string; error: string | null }> {
   await initPromise;
@@ -400,8 +400,7 @@ async function processSinglePanel(
     return { bubbles: bubbles || [], imageHash, error: null };
   } catch (error: any) {
     const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
-    const isOverloaded = !!(error.isOverloaded || geminiService.isOverloaded(error));
-    return { bubbles: [], imageHash, isRateLimit: isRateLimit || isOverloaded, error: error.message || "Processing failed" };
+    return { bubbles: [], imageHash, isRateLimit, error: error.message || "Processing failed" };
   }
 }
 
@@ -446,8 +445,8 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   for (const det of detectionResults) {
     if (det.fromCache || det.isRateLimit || det.bubbles.length === 0) continue;
     const start = allCrops.length;
-    allCrops.push(...det.bubbles.map((b) => b.cropDataUrl));
-    allTypes.push(...det.bubbles.map((b) => b.bubbleType ?? "speech"));
+    allCrops.push(...det.bubbles.map((b: DetectedBubble) => b.cropDataUrl));
+    allTypes.push(...det.bubbles.map((b: DetectedBubble) => b.bubbleType ?? "speech"));
     panelCropOffsets.push({ image: det.image, start, count: det.bubbles.length, imageHash: det.imageHash });
   }
 
@@ -465,9 +464,16 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
       if (isRateLimit) {
         rateLimitHit = true;
         if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+      } else {
+        console.error("[BACKGROUND] Gemini translation failed:", error.message);
+        sendToTab({ action: "BATCH_COMPLETE", success: false, error: error.message || "Translation failed", isFinal: true });
+        return;
       }
     }
   }
+
+  const offsetMap = new Map(panelCropOffsets.map(p => [p.image.id, p]));
+  const bubblesMap = new Map(detectionResults.map(d => [d.image.id, d.bubbles ?? []]));
 
   for (const det of detectionResults) {
     if (isAborted()) break;
@@ -484,12 +490,14 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
       }
       sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions: det.cached, wasRateLimited: false });
     } else {
-      const offset = panelCropOffsets.find(p => p.image.id === det.image.id);
+      const offset = offsetMap.get(det.image.id);
       const translations = offset ? allTranslations.slice(offset.start, offset.start + offset.count) : [];
-      const bubbles = detectionResults.find(d => d.image.id === det.image.id)?.bubbles ?? [];
+      const bubbles = bubblesMap.get(det.image.id) ?? [];
       const textRegions = buildTextRegions(bubbles, translations);
-      await cache.set(det.imageHash, settings.targetLanguage, textRegions);
-      if (textRegions.length > 0) anySuccess = true;
+      if (textRegions.length > 0) {
+        await cache.set(det.imageHash, settings.targetLanguage, textRegions);
+        anySuccess = true;
+      }
       if (wasRateLimited) anyRateLimited = true;
       sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions, wasRateLimited });
     }

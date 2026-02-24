@@ -36,12 +36,13 @@ LABEL_TEXT_FREE = 2
 processor: Optional[AutoProcessor] = None
 rtdetr_model: Optional[AutoModelForObjectDetection] = None
 model_loaded = False
-thread_pool = ThreadPoolExecutor(max_workers=10)
+thread_pool: Optional[ThreadPoolExecutor] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global processor, rtdetr_model, model_loaded
+    global processor, rtdetr_model, model_loaded, thread_pool
+    thread_pool = ThreadPoolExecutor(max_workers=10)
     try:
         os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
         processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR, use_fast=True)
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to load model: {e}")
         model_loaded = False
     yield
+    thread_pool.shutdown(wait=False)
 
 
 app = FastAPI(title="Panora RT-DETR Bubble Detector", lifespan=lifespan)
@@ -189,7 +191,7 @@ async def detect_bubbles(request: DetectRequest):
         )[0]
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         detections = await loop.run_in_executor(thread_pool, run_inference)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RT-DETR inference failed: {e}")

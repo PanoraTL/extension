@@ -58,7 +58,7 @@ function IndexPopup() {
     toast.dismiss();
     toast.custom((t) => (
       <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #888", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
-        <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+        <button type="button" aria-label="Dismiss notification" onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
         <div style={{ fontSize: "13px", fontWeight: 600, color: "#555" }}>Translation stopped</div>
       </div>
     ), { duration: 3000 });
@@ -67,7 +67,7 @@ function IndexPopup() {
   const showErrorToast = (title: string, description?: string) => {
     toast.custom((t) => (
       <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #C15F3C", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
-        <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#C15F3C", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+        <button type="button" aria-label="Dismiss notification" onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#C15F3C", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
         <div style={{ fontSize: "13px", fontWeight: 600, color: "#C15F3C" }}>{title}</div>
         {description && <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{description}</div>}
       </div>
@@ -138,7 +138,7 @@ function IndexPopup() {
         if (newStatus === "complete" && prevStatus !== "complete") {
           toast.custom((t) => (
             <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #4CAF50", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
-              <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#4CAF50", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+              <button type="button" aria-label="Dismiss notification" onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#4CAF50", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
               <div style={{ fontSize: "13px", fontWeight: 600, color: "#4CAF50" }}>Translation complete!</div>
               <div style={{ fontSize: "11px", color: "#D4775A", marginTop: "2px" }}>{message.total} panel{message.total !== 1 ? "s" : ""} translated</div>
             </div>
