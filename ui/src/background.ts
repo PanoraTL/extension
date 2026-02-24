@@ -28,14 +28,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
     batchAbortedByTab.set(tabId, true);
     sessionStatsByTab.delete(tabId);
-    batchAbortedByTab.delete(tabId);
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   batchAbortedByTab.set(tabId, true);
   sessionStatsByTab.delete(tabId);
-  batchAbortedByTab.delete(tabId);
 });
 
 class RequestQueue {
