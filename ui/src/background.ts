@@ -266,15 +266,24 @@ async function detectBubblesViaModel(
   let bubbles: DetectedBubble[];
 
   try {
-    const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_data: imageDataUrl }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_data: imageDataUrl }),
+      });
+    } catch (fetchErr: any) {
+      const err = new Error(fetchErr.message || "Detector unreachable");
+      (err as any).isDetectorError = true;
+      throw err;
+    }
 
     if (!response.ok) {
-      throw new Error(`Model server returned ${response.status}`);
+      const err = new Error(`Model server returned ${response.status}`);
+      (err as any).isDetectorError = true;
+      throw err;
     }
 
     const data = await response.json();
@@ -394,10 +403,14 @@ async function handleProcessImages(request: any, tabId?: number) {
               detectorConsecutiveFailures = 0;
               return { textRegions: regions, wasRateLimited };
             } catch (detectorError: any) {
-              detectorConsecutiveFailures++;
-              console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
-              if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
-                modelAvailable = false;
+              if (detectorError.isDetectorError) {
+                detectorConsecutiveFailures++;
+                console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
+                if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
+                  modelAvailable = false;
+                }
+              } else {
+                throw detectorError;
               }
             }
           }
