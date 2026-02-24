@@ -8,7 +8,12 @@ interface TranslationOverlayProps {
   onClose?: () => void;
 }
 
-function getImageContentRect(img: HTMLImageElement): { left: number; top: number; width: number; height: number } {
+function getImageContentRect(img: HTMLImageElement): {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+} {
   const elRect = img.getBoundingClientRect();
   const elW = elRect.width;
   const elH = elRect.height;
@@ -43,9 +48,14 @@ function getImageContentRect(img: HTMLImageElement): { left: number; top: number
   return { left: elRect.left, top: elRect.top, width: elW, height: elH };
 }
 
-function positionContainerOverImage(container: HTMLElement, img: HTMLImageElement) {
+function positionContainerOverImage(
+  container: HTMLElement,
+  img: HTMLImageElement,
+) {
   const content = getImageContentRect(img);
-  const parentRect = (container.parentElement as HTMLElement).getBoundingClientRect();
+  const parentRect = (
+    container.parentElement as HTMLElement
+  ).getBoundingClientRect();
   container.style.left = `${content.left - parentRect.left}px`;
   container.style.top = `${content.top - parentRect.top}px`;
   container.style.width = `${content.width}px`;
@@ -96,8 +106,9 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
     };
   }, [imageElement, container]);
 
-const getFontFamily = (style?: string): string => {
-    if (style === "condensed") return "'Anime Ace', 'Impact', 'Arial Narrow', sans-serif";
+  const getFontFamily = (style?: string): string => {
+    if (style === "condensed")
+      return "'Anime Ace', 'Impact', 'Arial Narrow', sans-serif";
     return "'Anime Ace', 'Comic Sans MS', Arial, sans-serif";
   };
 
@@ -105,7 +116,15 @@ const getFontFamily = (style?: string): string => {
   if (imgW === 0 || imgH === 0) return null;
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", pointerEvents: "none", overflow: "hidden" }}>
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        overflow: "hidden",
+      }}
+    >
       {textRegions.map((region, index) => {
         const bx = region.bounds.x;
         const by = region.bounds.y;
@@ -133,7 +152,12 @@ const getFontFamily = (style?: string): string => {
 
         const boxWPx = (maskW / 100) * imgW;
         const boxHPx = (maskH / 100) * imgH;
-        const fontSize = Math.max(14, Math.min(boxHPx * 0.28, boxWPx * 0.09, 18));
+        const fontSize = Math.max(
+          14,
+          Math.min(boxHPx * 0.28, boxWPx * 0.09, 18),
+        );
+
+        const isEmpty = !region.translatedText?.trim();
 
         return (
           <div
@@ -147,7 +171,7 @@ const getFontFamily = (style?: string): string => {
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
-              backgroundColor: "#FFFFFF",
+              backgroundColor: isEmpty ? "transparent" : "#FFFFFF",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",

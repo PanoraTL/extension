@@ -1,7 +1,9 @@
+import asyncio
 import base64
 import io
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -34,14 +36,16 @@ LABEL_TEXT_FREE = 2
 processor: Optional[AutoProcessor] = None
 rtdetr_model: Optional[AutoModelForObjectDetection] = None
 model_loaded = False
+thread_pool: Optional[ThreadPoolExecutor] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global processor, rtdetr_model, model_loaded
+    global processor, rtdetr_model, model_loaded, thread_pool
+    thread_pool = ThreadPoolExecutor(max_workers=10)
     try:
         os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
-        processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
+        processor = AutoProcessor.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR, use_fast=True)
         rtdetr_model = AutoModelForObjectDetection.from_pretrained(HF_REPO_ID, cache_dir=MODEL_CACHE_DIR)
         rtdetr_model = rtdetr_model.to(DEVICE)
         rtdetr_model.eval()
@@ -51,6 +55,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to load model: {e}")
         model_loaded = False
     yield
+    thread_pool.shutdown(wait=False)
 
 
 app = FastAPI(title="Panora RT-DETR Bubble Detector", lifespan=lifespan)
@@ -175,15 +180,19 @@ async def detect_bubbles(request: DetectRequest):
 
     img_w, img_h = pil_image.size
 
-    try:
+    def run_inference():
         inputs = processor(images=pil_image, return_tensors="pt")
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = rtdetr_model(**inputs)
         target_sizes = torch.tensor([pil_image.size[::-1]]).to(DEVICE)
-        detections = processor.post_process_object_detection(
+        return processor.post_process_object_detection(
             outputs, threshold=0.25, target_sizes=target_sizes
         )[0]
+
+    try:
+        loop = asyncio.get_running_loop()
+        detections = await loop.run_in_executor(thread_pool, run_inference)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RT-DETR inference failed: {e}")
 
@@ -226,13 +235,8 @@ async def detect_bubbles(request: DetectRequest):
         if raw_w < 5 or raw_h < 5:
             return None
 
-        cx1 = max(0, x1)
-        cy1 = max(0, y1)
-        cx2 = min(img_w, x2)
-        cy2 = min(img_h, y2)
-
-        visible_w = cx2 - cx1
-        visible_h = cy2 - cy1
+        visible_w = min(img_w, x2) - max(0, x1)
+        visible_h = min(img_h, y2) - max(0, y1)
 
         if visible_w < 5 or visible_h < 5:
             return None
@@ -241,6 +245,12 @@ async def detect_bubbles(request: DetectRequest):
         raw_area = raw_w * raw_h
         if raw_area > 0 and visible_area / raw_area < 0.5:
             return None
+
+        padding = 5
+        cx1 = max(0, x1 - padding)
+        cy1 = max(0, y1 - padding)
+        cx2 = min(img_w, x2 + padding)
+        cy2 = min(img_h, y2 + padding)
 
         pct_x = (x1 / img_w) * 100
         pct_y = (y1 / img_h) * 100

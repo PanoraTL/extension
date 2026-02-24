@@ -40,8 +40,7 @@ if [ -n "$existing_pid" ]; then
 fi
 
 echo "[SERVER] Starting RT-DETR detection server on http://127.0.0.1:5001"
-# --workers >1 spawns separate processes; MPS cannot be shared across processes so force CPU for multi-worker mode
-PANORA_DISABLE_MPS=1 uvicorn main:app --host 127.0.0.1 --port 5001 --workers 2 --app-dir "$SERVER_DIR" &
+uvicorn main:app --host 127.0.0.1 --port 5001 --app-dir "$SERVER_DIR" &
 SERVER_PID=$!
 
 deactivate
@@ -80,7 +79,7 @@ ICON_PID=$!
 # ── Wait ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "All services running:"
-echo "  RT-DETR server → http://127.0.0.1:5001 (2 workers, CPU)"
+echo "  RT-DETR server → http://127.0.0.1:5001"
 echo "  Extension    → ui/build/chrome-mv3-dev  (load unpacked in Chrome)"
 echo ""
 echo "Press Ctrl+C to stop all services."

@@ -2,11 +2,6 @@ import { geminiService } from "~/api/services";
 import type { TextRegion, DetectedBubble } from "~/types/translator.types";
 
 const MODEL_SERVER_URL = "http://localhost:5001";
-let modelAvailable: boolean | null = null;
-let lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 30000;
-let detectorConsecutiveFailures = 0;
-const DETECTOR_MAX_FAILURES = 3;
 const batchAbortedByTab = new Map<number, boolean>();
 
 interface SessionStats {
@@ -15,14 +10,13 @@ interface SessionStats {
   outputTokens: number;
   totalPanels: number;
   completedPanels: number;
+  cachedPanels: number;
   chunksDone: number;
   totalChunks: number;
 }
 const sessionStatsByTab = new Map<number, SessionStats>();
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("[BACKGROUND] Manga Translator extension installed");
-});
+chrome.runtime.onInstalled.addListener(() => {});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
@@ -114,24 +108,15 @@ const cache = new TranslationCache();
 let initPromise: Promise<void>;
 
 async function initializeServices() {
-  console.log("[BACKGROUND] Initializing services...");
-
   const result = await chrome.storage.local.get("gemini_api_key");
   const apiKey = result.gemini_api_key;
-
-  if (!apiKey) {
-    console.log("[BACKGROUND] No Gemini API key found. Add one in extension Settings.");
-    return;
-  }
-
+  if (!apiKey) return;
   geminiService.initialize(apiKey);
-  console.log("[BACKGROUND] Gemini service initialized");
 }
 
 initPromise = initializeServices();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("[BACKGROUND] Message received:", request.action);
 
   if (request.action === "FETCH_IMAGE") {
     handleFetchImage(request.url)
@@ -156,12 +141,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       batchAbortedByTab.set(tabId, false);
       if (!sessionStatsByTab.has(tabId)) {
         geminiService.resetTokenCount();
+        console.log(`[BACKGROUND] Starting translation: ${request.total} panel(s)`);
         sessionStatsByTab.set(tabId, {
           startTime: Date.now(),
           inputTokens: 0,
           outputTokens: 0,
           totalPanels: request.total,
           completedPanels: 0,
+          cachedPanels: 0,
           chunksDone: 0,
           totalChunks: Math.ceil(request.total / 10),
         });
@@ -189,16 +176,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return false;
   }
-  // session cleanup is handled inside handleProcessImagesBatch when wasStopped is detected
 
   if (request.action === "UPDATE_API_KEY") {
     const newKey = request.apiKey?.trim();
     if (newKey) {
       geminiService.initialize(newKey);
-      console.log("[BACKGROUND] Gemini service reinitialized with new API key");
     } else {
       geminiService.clear();
-      console.log("[BACKGROUND] Gemini service cleared — API key removed");
     }
     sendResponse({ success: true });
     return false;
@@ -209,7 +193,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const keys = Object.keys(items).filter((k) => k.startsWith("manga_translation_"));
       if (keys.length > 0) {
         chrome.storage.local.remove(keys, () => {
-          console.log(`[BACKGROUND] Cleared ${keys.length} cache entries`);
           sendResponse({ success: true, cleared: keys.length });
         });
       } else {
@@ -231,40 +214,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
-async function checkModel(): Promise<boolean> {
-  const now = Date.now();
-  if (modelAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
-    return modelAvailable;
-  }
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${MODEL_SERVER_URL}/health`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      const data = await resp.json();
-      modelAvailable = data.model_loaded === true;
-      if (modelAvailable) detectorConsecutiveFailures = 0;
-    } else {
-      modelAvailable = false;
-    }
-  } catch {
-    modelAvailable = false;
-  }
-  lastHealthCheck = Date.now();
-  console.log(`[BACKGROUND] Model available: ${modelAvailable}`);
-  return modelAvailable;
-}
-
-async function detectBubblesViaModel(
-  imageDataUrl: string,
-  targetLang: string,
-): Promise<{ regions: TextRegion[]; wasRateLimited: boolean }> {
+async function detectBubbles(imageDataUrl: string): Promise<DetectedBubble[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
-
-  let bubbles: DetectedBubble[];
-
   try {
     const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
       method: "POST",
@@ -272,54 +224,34 @@ async function detectBubblesViaModel(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image_data: imageDataUrl }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Model server returned ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`Detection server returned ${response.status}`);
     const data = await response.json();
-    bubbles = Array.isArray(data) ? data : [];
+    return (Array.isArray(data) ? data : []).filter((b: DetectedBubble) => !!b.cropDataUrl);
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
-
-  let translations: Array<{ originalText: string; translatedText: string }> = [];
-  let wasRateLimited = false;
-  if (validBubbles.length > 0) {
-    const result = await geminiService.extractAndTranslateFromCrops(
-      validBubbles.map((b) => b.cropDataUrl),
-      validBubbles.map((b) => b.bubbleType ?? "speech"),
-      targetLang,
-    );
-    translations = result.translations;
-    wasRateLimited = result.wasRateLimited;
-  }
-
-  const textRegions: TextRegion[] = [];
-  for (let i = 0; i < validBubbles.length; i++) {
-    const bubble = validBubbles[i];
-    const { originalText, translatedText } = translations[i] ?? { originalText: "", translatedText: "" };
-    textRegions.push({
-      originalText,
+function buildTextRegions(bubbles: DetectedBubble[], translations: string[]): TextRegion[] {
+  const regions: TextRegion[] = [];
+  for (let i = 0; i < bubbles.length; i++) {
+    const translatedText = translations[i] ?? "";
+    if (!translatedText.trim()) continue;
+    regions.push({
       translatedText,
-      bounds: bubble.bounds,
-      background: bubble.background,
-      detectedFontSizePct: bubble.detectedFontSizePct,
+      bounds: bubbles[i].bounds,
+      background: bubbles[i].background,
+      detectedFontSizePct: bubbles[i].detectedFontSizePct,
       detectedFontStyle: "normal",
-      confidence: bubble.confidence,
-      bubbleType: bubble.bubbleType,
+      confidence: bubbles[i].confidence,
+      bubbleType: bubbles[i].bubbleType,
     });
   }
-
-  console.log(`[BACKGROUND] RT-DETR returned ${textRegions.length} text bubbles`);
-  return { regions: textRegions, wasRateLimited };
+  return regions;
 }
 
 async function handleFetchImage(url: string): Promise<string> {
   await initPromise;
-  console.log("[BACKGROUND] Fetching image:", url.substring(0, 80));
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -342,7 +274,6 @@ async function handleFetchImage(url: string): Promise<string> {
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
-          console.log("[BACKGROUND] FETCH_IMAGE successful");
           resolve(reader.result as string);
         } else {
           reject(new Error("FileReader returned empty result"));
@@ -362,10 +293,6 @@ async function handleProcessImages(request: any, tabId?: number) {
   const results = [];
   const { images, settings } = request;
 
-  console.log(
-    `[BACKGROUND] Processing ${images.length} image(s) with target lang: ${settings.targetLanguage}`,
-  );
-
   for (let i = 0; i < images.length; i++) {
 
     const image = images[i];
@@ -383,39 +310,16 @@ async function handleProcessImages(request: any, tabId?: number) {
             );
           }
 
-          const useDetector = await checkModel();
-
-          if (useDetector) {
-            try {
-              const { regions, wasRateLimited } = await detectBubblesViaModel(
-                image.dataUrl,
-                settings.targetLanguage,
-              );
-              detectorConsecutiveFailures = 0;
-              return { textRegions: regions, wasRateLimited };
-            } catch (detectorError: any) {
-              detectorConsecutiveFailures++;
-              console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
-              if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
-                modelAvailable = false;
-              }
-            }
-          }
-
-          const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(
-            image.dataUrl,
+          const bubbles = await detectBubbles(image.dataUrl);
+          const result = await geminiService.extractAndTranslateFromCrops(
+            bubbles.map((b) => b.cropDataUrl),
+            bubbles.map((b) => b.bubbleType ?? "speech"),
             settings.targetLanguage,
           );
-
-          console.log(
-            `[BACKGROUND] Gemini returned ${regions.length} text regions for ${image.id}`,
-          );
-          return { textRegions: regions, wasRateLimited };
+          return { textRegions: buildTextRegions(bubbles, result.translations), wasRateLimited: result.wasRateLimited };
         });
 
         await cache.set(imageHash, settings.targetLanguage, textRegions.textRegions);
-      } else {
-        console.log(`[BACKGROUND] Cache hit for ${image.id}`);
       }
 
       results.push({
@@ -466,8 +370,6 @@ async function handleProcessImages(request: any, tabId?: number) {
     }
   }
 
-  console.log(`[BACKGROUND] Completed processing ${results.length} image(s)`);
-
   if (results.every((r) => r.error)) {
     throw new Error(
       results[results.length - 1]?.error || "All images failed to process",
@@ -480,47 +382,25 @@ async function handleProcessImages(request: any, tabId?: number) {
 
 async function processSinglePanel(
   image: { id: string; dataUrl: string },
-  settings: any,
+  _settings: any,
   isAborted: () => boolean = () => false,
-): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; error: string | null }> {
+): Promise<{ bubbles: DetectedBubble[]; isRateLimit?: boolean; imageHash: string; error: string | null }> {
   await initPromise;
-  if (isAborted()) return { textRegions: [], wasRateLimited: false, isRateLimit: false, error: null };
+  if (isAborted()) return { bubbles: [], imageHash: "", error: null };
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
-  const cached = await cache.get(imageHash, settings.targetLanguage);
-  if (cached) {
-    console.log(`[BACKGROUND] Cache hit for ${image.id}`);
-    return { textRegions: cached, wasRateLimited: false, isRateLimit: false, error: null };
-  }
 
   try {
-    const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
-      if (isAborted()) return { textRegions: [], wasRateLimited: false };
+    const bubbles = await requestQueue.add(async () => {
+      if (isAborted()) return [];
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
-      const useDetector = await checkModel();
-      if (useDetector) {
-        try {
-          const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
-          detectorConsecutiveFailures = 0;
-          return { textRegions: regions, wasRateLimited };
-        } catch (detectorError: any) {
-          detectorConsecutiveFailures++;
-          console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
-          if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
-            modelAvailable = false;
-          }
-        }
-      }
-      if (isAborted()) return { textRegions: [], wasRateLimited: false };
-      const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
-      return { textRegions: regions, wasRateLimited };
+      return detectBubbles(image.dataUrl);
     });
-    await cache.set(imageHash, settings.targetLanguage, textRegions);
-    return { textRegions: textRegions || [], wasRateLimited, isRateLimit: false, error: null };
+    return { bubbles: bubbles || [], imageHash, error: null };
   } catch (error: any) {
     const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
-    return { textRegions: [], wasRateLimited: false, isRateLimit, error: error.message || "Processing failed" };
+    return { bubbles: [], imageHash, isRateLimit, error: error.message || "Processing failed" };
   }
 }
 
@@ -532,8 +412,6 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   let anySuccess = false;
   let rateLimitHit = false;
 
-  console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
-
   const sendToTab = (msg: any) => {
     if (tabId) chrome.tabs.sendMessage(tabId, msg).catch(() => {});
   };
@@ -543,29 +421,90 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   const isAborted = () => tabId !== undefined && batchAbortedByTab.get(tabId) === true;
 
-  await Promise.allSettled(
+  const detectionResults = await Promise.all(
     images.map(async (image: { id: string; dataUrl: string }) => {
-      if (isAborted()) return;
-
-      const result = await processSinglePanel(image, settings, isAborted);
-
-      if (isAborted()) return;
-
-      completed++;
-
-      if (result.isRateLimit) {
-        rateLimitHit = true;
-        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
-        sendToTab({ action: "PANEL_ERROR", imageId: image.id, isRateLimit: true, error: result.error });
-      } else {
-        if (result.textRegions.length > 0) anySuccess = true;
-        if (result.wasRateLimited) anyRateLimited = true;
-        sendToTab({ action: "PANEL_RESULT", imageId: image.id, textRegions: result.textRegions, wasRateLimited: result.wasRateLimited });
-      }
-
-      sendToPopup({ action: "PROGRESS_UPDATE", current: completed, total, status: "processing" });
+      if (isAborted()) return { image, bubbles: [], fromCache: false, imageHash: "", cached: null as TextRegion[] | null, isRateLimit: false, error: null as string | null };
+      const imageHash = await TranslationCache.hashImage(image.dataUrl);
+      const cached = await cache.get(imageHash, settings.targetLanguage);
+      if (cached) return { image, bubbles: [] as DetectedBubble[], fromCache: true, imageHash, cached, isRateLimit: false, error: null as string | null };
+      const det = await processSinglePanel(image, settings, isAborted);
+      return { image, bubbles: det.bubbles, fromCache: false, imageHash, cached: null as TextRegion[] | null, isRateLimit: det.isRateLimit ?? false, error: det.error };
     })
   );
+
+  if (isAborted()) {
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: false, total: completed, stopped: true, isFinal: true });
+    sendToPopup({ action: "TRANSLATION_STOPPED" });
+    return;
+  }
+
+  const panelCropOffsets: { image: { id: string; dataUrl: string }; start: number; count: number; imageHash: string }[] = [];
+  const allCrops: string[] = [];
+  const allTypes: string[] = [];
+
+  for (const det of detectionResults) {
+    if (det.fromCache || det.isRateLimit || det.bubbles.length === 0) continue;
+    const start = allCrops.length;
+    allCrops.push(...det.bubbles.map((b: DetectedBubble) => b.cropDataUrl));
+    allTypes.push(...det.bubbles.map((b: DetectedBubble) => b.bubbleType ?? "speech"));
+    panelCropOffsets.push({ image: det.image, start, count: det.bubbles.length, imageHash: det.imageHash });
+  }
+
+  let allTranslations: string[] = [];
+  let wasRateLimited = false;
+  if (allCrops.length > 0) {
+    try {
+      const result = await geminiService.extractAndTranslateFromCrops(allCrops, allTypes, settings.targetLanguage);
+      allTranslations = result.translations;
+      wasRateLimited = result.wasRateLimited;
+    } catch (error: any) {
+      const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
+      if (isRateLimit) {
+        rateLimitHit = true;
+        if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+      } else {
+        console.error("[BACKGROUND] Gemini translation failed:", error.message);
+        sendToTab({ action: "BATCH_COMPLETE", success: false, error: error.message || "Translation failed", isFinal: true });
+        return;
+      }
+    }
+  }
+
+  const offsetMap = new Map(panelCropOffsets.map(p => [p.image.id, p]));
+  const bubblesMap = new Map(detectionResults.map(d => [d.image.id, d.bubbles ?? []]));
+
+  for (const det of detectionResults) {
+    if (isAborted()) break;
+    completed++;
+
+    if (det.isRateLimit) {
+      rateLimitHit = true;
+      if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
+      sendToTab({ action: "PANEL_ERROR", imageId: det.image.id, isRateLimit: true, error: det.error });
+    } else if (det.fromCache && det.cached) {
+      anySuccess = true;
+      if (tabId !== undefined && sessionStatsByTab.has(tabId)) {
+        sessionStatsByTab.get(tabId)!.cachedPanels++;
+      }
+      sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions: det.cached, wasRateLimited: false });
+    } else {
+      const offset = offsetMap.get(det.image.id);
+      const translations = offset ? allTranslations.slice(offset.start, offset.start + offset.count) : [];
+      const bubbles = bubblesMap.get(det.image.id) ?? [];
+      const textRegions = buildTextRegions(bubbles, translations);
+      if (textRegions.length > 0) {
+        await cache.set(det.imageHash, settings.targetLanguage, textRegions);
+        anySuccess = true;
+      }
+      if (wasRateLimited) anyRateLimited = true;
+      sendToTab({ action: "PANEL_RESULT", imageId: det.image.id, textRegions, wasRateLimited });
+    }
+
+    const session = tabId !== undefined ? sessionStatsByTab.get(tabId) : undefined;
+    const globalCompleted = session ? session.completedPanels + completed : completed;
+    const globalTotal = session ? session.totalPanels : total;
+    sendToPopup({ action: "PROGRESS_UPDATE", current: globalCompleted, total: globalTotal, status: "processing" });
+  }
 
   const wasStopped = isAborted();
 
@@ -580,7 +519,8 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     const isLastChunk = wasStopped || rateLimitHit || session.completedPanels >= session.totalPanels;
     if (isLastChunk) {
       const elapsedSec = ((Date.now() - session.startTime) / 1000).toFixed(1);
-      console.log(`[BACKGROUND] Translation complete: ${session.completedPanels}/${session.totalPanels} panels | ${elapsedSec}s total | tokens — input: ${session.inputTokens}, output: ${session.outputTokens}, total: ${session.inputTokens + session.outputTokens}`);
+      const freshPanels = session.completedPanels - session.cachedPanels;
+      console.log(`[BACKGROUND] Translation complete: ${session.completedPanels}/${session.totalPanels} panels (${freshPanels} translated, ${session.cachedPanels} cached) | ${elapsedSec}s | tokens — in: ${session.inputTokens}, out: ${session.outputTokens}, total: ${session.inputTokens + session.outputTokens}`);
       sessionStatsByTab.delete(tabId);
     }
   } else {
@@ -593,6 +533,7 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   if (wasStopped && !rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true, isFinal: true });
+    sendToPopup({ action: "TRANSLATION_STOPPED" });
   } else if (rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again.", isFinal: true });
   } else if (!anySuccess) {

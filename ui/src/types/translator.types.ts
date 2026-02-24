@@ -17,7 +17,6 @@ export interface DetectedImage {
 }
 
 export interface TextRegion {
-  originalText: string;
   translatedText: string;
   bounds: BoundingBox;
   background: BackgroundInfo;
