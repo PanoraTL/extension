@@ -30,7 +30,6 @@ export class GeminiService {
   }
 
   private switchToFallback() {
-    console.log(`[API] Rate limit hit on ${PRIMARY_MODEL}, switching to ${FALLBACK_MODEL}`);
     this.usingFallback = true;
   }
 
@@ -231,7 +230,6 @@ export class GeminiService {
       if (this.isRateLimit(error)) {
         if (!this.usingFallback) {
           this.switchToFallback();
-          console.log(`[API] Rate limit on primary model, retrying once with fallback`);
           try {
             const value = await fn();
             return { value, wasRateLimited: true };
@@ -239,14 +237,12 @@ export class GeminiService {
             const userError = new Error(this.getUserFacingError(fallbackError));
             (userError as any).cause = fallbackError;
             (userError as any).isRateLimit = true;
-            console.error("[API] Rate limit on fallback model, stopping");
             throw userError;
           }
         }
         const userError = new Error(this.getUserFacingError(error));
         (userError as any).cause = error;
         (userError as any).isRateLimit = true;
-        console.error("[API] Rate limit hit, stopping");
         throw userError;
       }
 
@@ -255,7 +251,6 @@ export class GeminiService {
         let lastError: any = error;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           const delay = this.isOverloaded(lastError) ? 1000 : this.getRetryDelay(lastError, attempt, 1000);
-          console.log(`[API] Retrying (${attempt + 1}/${maxRetries}) after ${delay}ms due to: ${lastError.message}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           try {
             const value = await fn();
