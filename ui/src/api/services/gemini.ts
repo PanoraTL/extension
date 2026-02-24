@@ -280,7 +280,7 @@ export class GeminiService {
     cropDataUrls: string[],
     bubbleTypes: string[],
     targetLang: string,
-  ): Promise<{ translations: Array<{ hasText: boolean; translatedText: string }>; wasRateLimited: boolean }> {
+  ): Promise<{ translations: string[]; wasRateLimited: boolean }> {
     const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
       const imageDescriptions = cropDataUrls
         .map((_, i) => `[Image ${i + 1} - ${bubbleTypes[i] ?? "speech"}]`)
@@ -290,10 +290,9 @@ export class GeminiService {
         `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
         `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
         `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
-        `For each image first determine if it contains any readable text. ` +
-        `Return ONLY a valid JSON array with exactly ${cropDataUrls.length} objects in the same order as the images. ` +
-        `Each object must have exactly two fields: "hasText" (boolean, true only if the image contains readable text), and "translatedText" (the text translated into ${targetLang} — the translatedText field MUST always be written in ${targetLang}, never in the source language, or empty string if no text). ` +
-        `Example: [{"hasText":true,"translatedText":"..."},{"hasText":false,"translatedText":""}]`;
+        `Return ONLY a valid JSON array of exactly ${cropDataUrls.length} strings in the same order as the images. ` +
+        `Each string is the translation in ${targetLang} — it MUST always be in ${targetLang}, never in the source language. Use an empty string if the image has no readable text. ` +
+        `Example: ["Hello, how are you?", "", "I see."]`;
 
       const parts: any[] = [prompt];
       for (const dataUrl of cropDataUrls) {
@@ -308,25 +307,17 @@ export class GeminiService {
 
       try {
         const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const sanitize = (s: string) => s
-          .replace(/"([^\x00-\x7F]+)(?=[,\]}])/g, '"')
-          .replace(/\}[^,\[\]{}\s]+(?=\s*\{)/g, '},')
-          .replace(/,\s*,/g, ',');
         const normalize = (s: string) => {
           const t = s.trim();
           const wrapped = t.startsWith("[") ? t : `[${t}`;
           return wrapped.endsWith("]") ? wrapped : `${wrapped}]`;
         };
-        const raw = cleaned.match(/\[[\s\S]*/)
-          ?? (cleaned.includes("{") ? [cleaned] : null);
+        const raw = cleaned.match(/\[[\s\S]*/);
         if (raw) {
-          const parsed = JSON.parse(sanitize(normalize(raw[0])));
+          const parsed = JSON.parse(normalize(raw[0]));
           if (Array.isArray(parsed)) {
-            const results = parsed.map((item: any) => ({
-              hasText: item.hasText === true,
-              translatedText: item.hasText === false ? "" : (item.translatedText || ""),
-            })) as Array<{ hasText: boolean; translatedText: string }>;
-            const emptyCount = results.filter(r => !r.hasText).length;
+            const results = parsed.map((item: any) => (typeof item === "string" ? item : ""));
+            const emptyCount = results.filter(r => !r).length;
             if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops had no text`);
             return results;
           }
@@ -336,7 +327,7 @@ export class GeminiService {
       }
 
       console.warn("[API] Failed to parse Gemini response, raw text:", text.substring(0, 300));
-      return cropDataUrls.map(() => ({ hasText: false, translatedText: "" }));
+      return cropDataUrls.map(() => "");
     });
     return { translations: value, wasRateLimited };
   }
@@ -345,7 +336,7 @@ export class GeminiService {
     cropDataUrls: string[],
     bubbleTypes: string[],
     targetLang: string = "en",
-  ): Promise<{ translations: Array<{ hasText: boolean; translatedText: string }>; wasRateLimited: boolean }> {
+  ): Promise<{ translations: string[]; wasRateLimited: boolean }> {
     if (!this.model) {
       throw new Error("Gemini API not initialized. Please provide an API key.");
     }
@@ -355,7 +346,7 @@ export class GeminiService {
       return this.extractAndTranslateChunk(cropDataUrls, bubbleTypes, targetLang);
     }
 
-    const translations: Array<{ hasText: boolean; translatedText: string }> = [];
+    const translations: string[] = [];
     let anyRateLimited = false;
     for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {
       const urlChunk = cropDataUrls.slice(i, i + CHUNK_SIZE);

@@ -157,7 +157,7 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
           Math.min(boxHPx * 0.28, boxWPx * 0.09, 18),
         );
 
-        const isEmpty = !region.hasText && !region.translatedText?.trim();
+        const isEmpty = !region.translatedText?.trim();
 
         return (
           <div

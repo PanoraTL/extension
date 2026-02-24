@@ -182,7 +182,7 @@ async def detect_bubbles(request: DetectRequest):
             outputs = rtdetr_model(**inputs)
         target_sizes = torch.tensor([pil_image.size[::-1]]).to(DEVICE)
         detections = processor.post_process_object_detection(
-            outputs, threshold=0.22, target_sizes=target_sizes
+            outputs, threshold=0.23, target_sizes=target_sizes
         )[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RT-DETR inference failed: {e}")

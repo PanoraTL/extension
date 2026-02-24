@@ -244,7 +244,7 @@ async function detectBubblesViaModel(
 
   const validBubbles = bubbles.filter((b) => !!b.cropDataUrl);
 
-  let translations: Array<{ hasText: boolean; translatedText: string }> = [];
+  let translations: string[] = [];
   let wasRateLimited = false;
   if (validBubbles.length > 0) {
     const result = await geminiService.extractAndTranslateFromCrops(
@@ -254,17 +254,16 @@ async function detectBubblesViaModel(
     );
     translations = result.translations;
     wasRateLimited = result.wasRateLimited;
-    const translated = translations.filter(t => t.hasText).length;
+    const translated = translations.filter(t => !!t).length;
     console.log(`[API] Gemini translation complete: ${translated}/${translations.length} bubbles translated`);
   }
 
   const textRegions: TextRegion[] = [];
   for (let i = 0; i < validBubbles.length; i++) {
     const bubble = validBubbles[i];
-    const { hasText, translatedText } = translations[i] ?? { hasText: false, translatedText: "" };
-    if (!hasText && !translatedText.trim()) continue;
+    const translatedText = translations[i] ?? "";
+    if (!translatedText.trim()) continue;
     textRegions.push({
-      hasText,
       translatedText,
       bounds: bubble.bounds,
       background: bubble.background,
