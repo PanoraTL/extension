@@ -452,7 +452,8 @@ async function processSinglePanel(
     return { textRegions: textRegions || [], wasRateLimited, isRateLimit: false, error: null };
   } catch (error: any) {
     const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
-    return { textRegions: [], wasRateLimited: false, isRateLimit, error: error.message || "Processing failed" };
+    const isOverloaded = !!(error.isOverloaded || geminiService.isOverloaded(error));
+    return { textRegions: [], wasRateLimited: false, isRateLimit: isRateLimit || isOverloaded, error: error.message || "Processing failed" };
   }
 }
 

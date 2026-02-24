@@ -158,6 +158,12 @@ export class GeminiService {
     return false;
   }
 
+  isOverloaded(error: any): boolean {
+    const msg = (error.message || "").toLowerCase();
+    const status = error.status || error.statusCode || 0;
+    return status === 503 || msg.includes("503") || msg.includes("overloaded") || msg.includes("high demand");
+  }
+
   private getRetryDelay(
     error: any,
     attempt: number,
@@ -185,6 +191,9 @@ export class GeminiService {
     }
     if (status === 403 || msg.includes("permission denied")) {
       return "API key lacks permission. Your Gemini API key may be restricted or the project quota is permanently exhausted.";
+    }
+    if (status === 503 || msg.includes("503") || msg.includes("overloaded") || (msg.includes("unavailable") && !msg.includes("server"))) {
+      return "Gemini is experiencing high demand. Translation stopped — please try again in a moment.";
     }
     if (status === 429 || msg.includes("rate limit")) {
       return "Gemini API rate limit reached. Please wait a moment and try again.";
@@ -252,6 +261,7 @@ export class GeminiService {
           const userError = new Error(this.getUserFacingError(retryError));
           (userError as any).cause = retryError;
           (userError as any).isRateLimit = this.isRateLimit(retryError);
+          (userError as any).isOverloaded = this.isOverloaded(retryError);
           throw userError;
         }
       }
