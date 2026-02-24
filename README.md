@@ -15,9 +15,6 @@ A locally running RT-DETR-v2 model detects three classes of text regions: outer 
 **Per-Region OCR and Translation**
 Each detected region crop is sent to Gemini 2.5 Flash Lite for text extraction and translation. The primary model falls back to Gemini 2.5 Flash automatically when rate limits are hit.
 
-**Gemini Fallback Detection**
-If the local detection server is unavailable, the extension falls back to Gemini-based full-image detection and translation, ensuring the extension works without any local server running.
-
 **Overlay Rendering**
 Translated text is rendered as positioned overlays directly on top of the manga image. The overlay system accounts for object-fit, partial bubbles at image edges, bubble type (speech, narration, tall, text_free), and font size estimation.
 

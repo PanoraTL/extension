@@ -2,11 +2,6 @@ import { geminiService } from "~/api/services";
 import type { TextRegion, DetectedBubble } from "~/types/translator.types";
 
 const MODEL_SERVER_URL = "http://localhost:5001";
-let modelAvailable: boolean | null = null;
-let lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 30000;
-let detectorConsecutiveFailures = 0;
-const DETECTOR_MAX_FAILURES = 3;
 const batchAbortedByTab = new Map<number, boolean>();
 
 interface SessionStats {
@@ -231,31 +226,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
-async function checkModel(): Promise<boolean> {
-  const now = Date.now();
-  if (modelAvailable !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
-    return modelAvailable;
-  }
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${MODEL_SERVER_URL}/health`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      const data = await resp.json();
-      modelAvailable = data.model_loaded === true;
-      if (modelAvailable) detectorConsecutiveFailures = 0;
-    } else {
-      modelAvailable = false;
-    }
-  } catch {
-    modelAvailable = false;
-  }
-  lastHealthCheck = Date.now();
-  console.log(`[BACKGROUND] Model available: ${modelAvailable}`);
-  return modelAvailable;
-}
-
 async function detectBubblesViaModel(
   imageDataUrl: string,
   targetLang: string,
@@ -266,24 +236,15 @@ async function detectBubblesViaModel(
   let bubbles: DetectedBubble[];
 
   try {
-    let response: Response;
-    try {
-      response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_data: imageDataUrl }),
-      });
-    } catch (fetchErr: any) {
-      const err = new Error(fetchErr.message || "Detector unreachable");
-      (err as any).isDetectorError = true;
-      throw err;
-    }
+    const response = await fetch(`${MODEL_SERVER_URL}/detect-bubbles`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_data: imageDataUrl }),
+    });
 
     if (!response.ok) {
-      const err = new Error(`Model server returned ${response.status}`);
-      (err as any).isDetectorError = true;
-      throw err;
+      throw new Error(`Detection server returned ${response.status}`);
     }
 
     const data = await response.json();
@@ -392,36 +353,9 @@ async function handleProcessImages(request: any, tabId?: number) {
             );
           }
 
-          const useDetector = await checkModel();
-
-          if (useDetector) {
-            try {
-              const { regions, wasRateLimited } = await detectBubblesViaModel(
-                image.dataUrl,
-                settings.targetLanguage,
-              );
-              detectorConsecutiveFailures = 0;
-              return { textRegions: regions, wasRateLimited };
-            } catch (detectorError: any) {
-              if (detectorError.isDetectorError) {
-                detectorConsecutiveFailures++;
-                console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
-                if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
-                  modelAvailable = false;
-                }
-              } else {
-                throw detectorError;
-              }
-            }
-          }
-
-          const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(
+          const { regions, wasRateLimited } = await detectBubblesViaModel(
             image.dataUrl,
             settings.targetLanguage,
-          );
-
-          console.log(
-            `[BACKGROUND] Gemini returned ${regions.length} text regions for ${image.id}`,
           );
           return { textRegions: regions, wasRateLimited };
         });
@@ -511,22 +445,7 @@ async function processSinglePanel(
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
-      const useDetector = await checkModel();
-      if (useDetector) {
-        try {
-          const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
-          detectorConsecutiveFailures = 0;
-          return { textRegions: regions, wasRateLimited };
-        } catch (detectorError: any) {
-          detectorConsecutiveFailures++;
-          console.warn(`[BACKGROUND] Detector failed (${detectorConsecutiveFailures}/${DETECTOR_MAX_FAILURES}), falling back to Gemini:`, detectorError.message);
-          if (detectorConsecutiveFailures >= DETECTOR_MAX_FAILURES) {
-            modelAvailable = false;
-          }
-        }
-      }
-      if (isAborted()) return { textRegions: [], wasRateLimited: false };
-      const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
+      const { regions, wasRateLimited } = await detectBubblesViaModel(image.dataUrl, settings.targetLanguage);
       return { textRegions: regions, wasRateLimited };
     });
     await cache.set(imageHash, settings.targetLanguage, textRegions);
