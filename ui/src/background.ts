@@ -562,13 +562,16 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   }
   if (tabId !== undefined) batchAbortedByTab.delete(tabId);
 
+  const isLastChunk = wasStopped || rateLimitHit ||
+    (tabId !== undefined ? !sessionStatsByTab.has(tabId) : true);
+
   if (wasStopped && !rateLimitHit) {
-    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true });
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true, isFinal: true });
   } else if (rateLimitHit) {
-    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });
+    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again.", isFinal: true });
   } else if (!anySuccess) {
-    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again." });
+    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again.", isFinal: isLastChunk });
   } else {
-    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed });
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, isFinal: isLastChunk });
   }
 }
