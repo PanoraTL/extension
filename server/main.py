@@ -187,7 +187,7 @@ async def detect_bubbles(request: DetectRequest):
             outputs = rtdetr_model(**inputs)
         target_sizes = torch.tensor([pil_image.size[::-1]]).to(DEVICE)
         return processor.post_process_object_detection(
-            outputs, threshold=0.23, target_sizes=target_sizes
+            outputs, threshold=0.25, target_sizes=target_sizes
         )[0]
 
     try:
