@@ -509,6 +509,7 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   if (wasStopped && !rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true, isFinal: true });
+    sendToPopup({ action: "TRANSLATION_STOPPED" });
   } else if (rateLimitHit) {
     sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again.", isFinal: true });
   } else if (!anySuccess) {

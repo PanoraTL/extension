@@ -309,7 +309,8 @@ export class GeminiService {
         const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
         const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+          const sanitized = jsonMatch[0].replace(/"([^\x00-\x7F]+)(?=[,\]}])/g, '"');
+          const parsed = JSON.parse(sanitized);
           if (Array.isArray(parsed)) {
             const results = parsed.map((item: any) => ({
               originalText: item.originalText || "",

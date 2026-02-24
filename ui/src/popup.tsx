@@ -54,6 +54,16 @@ const FEATURES = [
 function IndexPopup() {
   const { data: session, isPending: authLoading } = authClient.useSession();
 
+  const showStoppedToast = () => {
+    toast.dismiss();
+    toast.custom((t) => (
+      <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #888", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
+        <button onClick={() => toast.dismiss(t)} style={{ position: "absolute", top: "8px", right: "8px", background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: "13px", lineHeight: 1, padding: "2px" }}>✕</button>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "#555" }}>Translation stopped</div>
+      </div>
+    ), { duration: 3000 });
+  };
+
   const showErrorToast = (title: string, description?: string) => {
     toast.custom((t) => (
       <div style={{ position: "relative", background: "#FAFAFA", border: "1.5px solid #C15F3C", borderRadius: "10px", padding: "12px 36px 12px 14px", boxShadow: "0 4px 16px rgba(193,95,60,0.15)", fontFamily: "'Inter', sans-serif", minWidth: "260px" }}>
@@ -150,6 +160,12 @@ function IndexPopup() {
         setStatus("idle");
         setProgress({ current: 0, total: 0 });
         setDetectedTotal(0);
+      } else if (message.action === "TRANSLATION_STOPPED") {
+        statusRef.current = "idle";
+        setStatus("idle");
+        setProgress({ current: 0, total: 0 });
+        setDetectedTotal(0);
+        showStoppedToast();
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -223,6 +239,7 @@ function IndexPopup() {
       setStatus("idle");
       setProgress({ current: 0, total: 0 });
       setDetectedTotal(0);
+      showStoppedToast();
     } catch (err) {
       console.error("Failed to stop translation:", err);
     }

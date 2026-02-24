@@ -135,6 +135,8 @@ const getFontFamily = (style?: string): string => {
         const boxHPx = (maskH / 100) * imgH;
         const fontSize = Math.max(14, Math.min(boxHPx * 0.28, boxWPx * 0.09, 18));
 
+        const isEmpty = !region.translatedText?.trim();
+
         return (
           <div
             key={index}
@@ -147,7 +149,7 @@ const getFontFamily = (style?: string): string => {
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
-              backgroundColor: "#FFFFFF",
+              backgroundColor: isEmpty ? "transparent" : "#FFFFFF",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
