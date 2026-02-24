@@ -15,7 +15,9 @@ interface SessionStats {
 }
 const sessionStatsByTab = new Map<number, SessionStats>();
 
-chrome.runtime.onInstalled.addListener(() => {});
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("[BACKGROUND] Manga Translator extension installed");
+});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
@@ -107,15 +109,24 @@ const cache = new TranslationCache();
 let initPromise: Promise<void>;
 
 async function initializeServices() {
+  console.log("[BACKGROUND] Initializing services...");
+
   const result = await chrome.storage.local.get("gemini_api_key");
   const apiKey = result.gemini_api_key;
-  if (!apiKey) return;
+
+  if (!apiKey) {
+    console.log("[BACKGROUND] No Gemini API key found. Add one in extension Settings.");
+    return;
+  }
+
   geminiService.initialize(apiKey);
+  console.log("[BACKGROUND] Gemini service initialized");
 }
 
 initPromise = initializeServices();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log("[BACKGROUND] Message received:", request.action);
 
   if (request.action === "FETCH_IMAGE") {
     handleFetchImage(request.url)
@@ -179,8 +190,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const newKey = request.apiKey?.trim();
     if (newKey) {
       geminiService.initialize(newKey);
+      console.log("[BACKGROUND] Gemini service reinitialized with new API key");
     } else {
       geminiService.clear();
+      console.log("[BACKGROUND] Gemini service cleared — API key removed");
     }
     sendResponse({ success: true });
     return false;
@@ -191,6 +204,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const keys = Object.keys(items).filter((k) => k.startsWith("manga_translation_"));
       if (keys.length > 0) {
         chrome.storage.local.remove(keys, () => {
+          console.log(`[BACKGROUND] Cleared ${keys.length} cache entries`);
           sendResponse({ success: true, cleared: keys.length });
         });
       } else {
@@ -269,11 +283,13 @@ async function detectBubblesViaModel(
     });
   }
 
+  console.log(`[BACKGROUND] RT-DETR returned ${textRegions.length} text bubbles`);
   return { regions: textRegions, wasRateLimited };
 }
 
 async function handleFetchImage(url: string): Promise<string> {
   await initPromise;
+  console.log("[BACKGROUND] Fetching image:", url.substring(0, 80));
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -296,6 +312,7 @@ async function handleFetchImage(url: string): Promise<string> {
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
+          console.log("[BACKGROUND] FETCH_IMAGE successful");
           resolve(reader.result as string);
         } else {
           reject(new Error("FileReader returned empty result"));
@@ -314,6 +331,10 @@ async function handleProcessImages(request: any, tabId?: number) {
 
   const results = [];
   const { images, settings } = request;
+
+  console.log(
+    `[BACKGROUND] Processing ${images.length} image(s) with target lang: ${settings.targetLanguage}`,
+  );
 
   for (let i = 0; i < images.length; i++) {
 
@@ -340,6 +361,8 @@ async function handleProcessImages(request: any, tabId?: number) {
         });
 
         await cache.set(imageHash, settings.targetLanguage, textRegions.textRegions);
+      } else {
+        console.log(`[BACKGROUND] Cache hit for ${image.id}`);
       }
 
       results.push({
@@ -390,6 +413,8 @@ async function handleProcessImages(request: any, tabId?: number) {
     }
   }
 
+  console.log(`[BACKGROUND] Completed processing ${results.length} image(s)`);
+
   if (results.every((r) => r.error)) {
     throw new Error(
       results[results.length - 1]?.error || "All images failed to process",
@@ -410,6 +435,7 @@ async function processSinglePanel(
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
   const cached = await cache.get(imageHash, settings.targetLanguage);
   if (cached) {
+    console.log(`[BACKGROUND] Cache hit for ${image.id}`);
     return { textRegions: cached, wasRateLimited: false, isRateLimit: false, error: null };
   }
 
@@ -438,6 +464,8 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   let anyRateLimited = false;
   let anySuccess = false;
   let rateLimitHit = false;
+
+  console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
 
   const sendToTab = (msg: any) => {
     if (tabId) chrome.tabs.sendMessage(tabId, msg).catch(() => {});
