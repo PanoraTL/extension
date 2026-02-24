@@ -1,15 +1,14 @@
 {
   "name": "panora-extension",
   "displayName": "Panora",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Read any manga, in any language, instantly.",
   "author": "Rithvik",
   "license": "MIT",
   "scripts": {
     "dev": "plasmo dev",
-    "dev:server": "cd auth && npm run dev",
-    "dev:extension": "plasmo dev",
-    "dev:all": "concurrently -n \"SERVER,EXTENSION\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:extension\"",
+    "dev:auth": "cd auth && npm run dev",
+    "dev:full": "concurrently -n \"AUTH,EXTENSION\" -c \"cyan,magenta\" \"npm run dev:auth\" \"npm run dev\"",
     "build": "plasmo build",
     "build:server": "cd auth && npm run deploy",
     "build:all": "npm run build && npm run build:server",

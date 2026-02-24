@@ -67,6 +67,7 @@ function IndexPopup() {
   const [status, setStatus] = useState<TranslationStatus>("idle");
   const statusRef = useRef<TranslationStatus>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [detectedTotal, setDetectedTotal] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<TranslationSettings>({
     autoDetectLanguage: true,
@@ -96,6 +97,19 @@ function IndexPopup() {
         setDraftApiKey(storedKey);
       }
     });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab?.id) return;
+      chrome.runtime.sendMessage({ action: "GET_TRANSLATION_STATUS", tabId: tab.id }, (resp) => {
+        if (chrome.runtime.lastError || !resp) return;
+        if (resp.isProcessing) {
+          statusRef.current = "processing";
+          setStatus("processing");
+          setProgress({ current: resp.completedPanels, total: resp.totalPanels });
+          setDetectedTotal(resp.totalPanels);
+        }
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -108,6 +122,7 @@ function IndexPopup() {
   useEffect(() => {
     const handleMessage = (message: any) => {
       if (message.action === "PROGRESS_UPDATE") {
+        if (message.current === 0) setDetectedTotal(message.total);
         setProgress({ current: message.current, total: message.total });
         const newStatus = message.status || "processing";
         const prevStatus = statusRef.current;
@@ -124,6 +139,7 @@ function IndexPopup() {
           statusRef.current = "idle";
           setStatus("idle");
           setProgress({ current: 0, total: 0 });
+          setDetectedTotal(0);
         }
       } else if (message.action === "ERROR") {
         if (statusRef.current !== "idle") {
@@ -133,6 +149,7 @@ function IndexPopup() {
         statusRef.current = "idle";
         setStatus("idle");
         setProgress({ current: 0, total: 0 });
+        setDetectedTotal(0);
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -205,6 +222,7 @@ function IndexPopup() {
       statusRef.current = "idle";
       setStatus("idle");
       setProgress({ current: 0, total: 0 });
+      setDetectedTotal(0);
     } catch (err) {
       console.error("Failed to stop translation:", err);
     }
@@ -1381,6 +1399,22 @@ function IndexPopup() {
               <span style={{ fontWeight: 600, color: "#C15F3C" }}>
                 {progress.current} / {progress.total}
               </span>
+            </div>
+            <div
+              style={{
+                fontSize: "11px",
+                color: "#D4775A",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="#D4775A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="10" cy="10" r="7" />
+                <line x1="10" y1="7" x2="10" y2="10" />
+                <line x1="10" y1="13" x2="10" y2="13.5" strokeWidth="2.2" />
+              </svg>
+              {detectedTotal} panel{detectedTotal !== 1 ? "s" : ""} detected on page
             </div>
             <div
               style={{

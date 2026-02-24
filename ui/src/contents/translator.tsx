@@ -211,15 +211,17 @@ const MangaTranslator = () => {
         return false;
       }
       if (message.action === "BATCH_COMPLETE") {
-        processingRef.current = false;
-        if (message.stopped) {
-          // user stopped intentionally — go idle without any toast
-        } else if (!message.success) {
-          notifyPopup({ action: "ERROR", error: message.error, isRateLimit: message.isRateLimit });
-        } else if (message.wasRateLimited) {
-          notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed via fallback model.", isRateLimit: true });
-        } else {
-          notifyPopup({ action: "PROGRESS_UPDATE", current: message.total, total: message.total, status: "complete" });
+        if (message.isFinal) {
+          processingRef.current = false;
+          if (message.stopped) {
+            // user stopped intentionally — go idle without any toast
+          } else if (!message.success) {
+            notifyPopup({ action: "ERROR", error: message.error, isRateLimit: message.isRateLimit });
+          } else if (message.wasRateLimited) {
+            notifyPopup({ action: "ERROR", error: "Rate limit hit — translation completed via fallback model.", isRateLimit: true });
+          } else {
+            notifyPopup({ action: "PROGRESS_UPDATE", current: message.total, total: message.total, status: "complete" });
+          }
         }
         return false;
       }

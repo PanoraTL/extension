@@ -9,8 +9,31 @@ let detectorConsecutiveFailures = 0;
 const DETECTOR_MAX_FAILURES = 3;
 const batchAbortedByTab = new Map<number, boolean>();
 
+interface SessionStats {
+  startTime: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalPanels: number;
+  completedPanels: number;
+  chunksDone: number;
+  totalChunks: number;
+}
+const sessionStatsByTab = new Map<number, SessionStats>();
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    batchAbortedByTab.set(tabId, true);
+    sessionStatsByTab.delete(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  batchAbortedByTab.set(tabId, true);
+  sessionStatsByTab.delete(tabId);
 });
 
 class RequestQueue {
@@ -129,7 +152,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "PROCESS_IMAGES_BATCH") {
     const tabId = sender.tab?.id;
-    if (tabId !== undefined) batchAbortedByTab.set(tabId, false);
+    if (tabId !== undefined) {
+      batchAbortedByTab.set(tabId, false);
+      if (!sessionStatsByTab.has(tabId)) {
+        geminiService.resetTokenCount();
+        sessionStatsByTab.set(tabId, {
+          startTime: Date.now(),
+          inputTokens: 0,
+          outputTokens: 0,
+          totalPanels: request.total,
+          completedPanels: 0,
+          chunksDone: 0,
+          totalChunks: Math.ceil(request.total / 10),
+        });
+      }
+    }
     sendResponse({ success: true });
     handleProcessImagesBatch(request, tabId);
     return false;
@@ -141,6 +178,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
     return false;
   }
+
+  if (request.action === "GET_TRANSLATION_STATUS") {
+    const tabId = request.tabId;
+    const session = tabId !== undefined ? sessionStatsByTab.get(tabId) : undefined;
+    sendResponse({
+      isProcessing: session !== undefined,
+      completedPanels: session?.completedPanels ?? 0,
+      totalPanels: session?.totalPanels ?? 0,
+    });
+    return false;
+  }
+  // session cleanup is handled inside handleProcessImagesBatch when wasStopped is detected
 
   if (request.action === "UPDATE_API_KEY") {
     const newKey = request.apiKey?.trim();
@@ -252,7 +301,6 @@ async function detectBubblesViaModel(
   for (let i = 0; i < validBubbles.length; i++) {
     const bubble = validBubbles[i];
     const { originalText, translatedText } = translations[i] ?? { originalText: "", translatedText: "" };
-    if (!originalText.trim() || !translatedText.trim()) continue;
     textRegions.push({
       originalText,
       translatedText,
@@ -433,8 +481,10 @@ async function handleProcessImages(request: any, tabId?: number) {
 async function processSinglePanel(
   image: { id: string; dataUrl: string },
   settings: any,
+  isAborted: () => boolean = () => false,
 ): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; error: string | null }> {
   await initPromise;
+  if (isAborted()) return { textRegions: [], wasRateLimited: false, isRateLimit: false, error: null };
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
   const cached = await cache.get(imageHash, settings.targetLanguage);
   if (cached) {
@@ -444,6 +494,7 @@ async function processSinglePanel(
 
   try {
     const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
+      if (isAborted()) return { textRegions: [], wasRateLimited: false };
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
@@ -461,6 +512,7 @@ async function processSinglePanel(
           }
         }
       }
+      if (isAborted()) return { textRegions: [], wasRateLimited: false };
       const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
       return { textRegions: regions, wasRateLimited };
     });
@@ -479,7 +531,6 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
   let anyRateLimited = false;
   let anySuccess = false;
   let rateLimitHit = false;
-  const startTime = Date.now();
 
   console.log(`[BACKGROUND] Batch processing ${total} panel(s) concurrently`);
 
@@ -496,7 +547,7 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     images.map(async (image: { id: string; dataUrl: string }) => {
       if (isAborted()) return;
 
-      const result = await processSinglePanel(image, settings);
+      const result = await processSinglePanel(image, settings, isAborted);
 
       if (isAborted()) return;
 
@@ -516,22 +567,37 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     })
   );
 
-  const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
-  const inputTokens = geminiService.totalInputTokens;
-  const outputTokens = geminiService.totalOutputTokens;
-  console.log(`[BACKGROUND] Batch complete: ${completed}/${total} panels | ${elapsedSec}s | tokens — input: ${inputTokens}, output: ${outputTokens}, total: ${inputTokens + outputTokens}`);
-  geminiService.resetTokenCount();
-
   const wasStopped = isAborted();
+
+  if (tabId !== undefined && sessionStatsByTab.has(tabId)) {
+    const session = sessionStatsByTab.get(tabId)!;
+    session.completedPanels += completed;
+    session.chunksDone++;
+    session.inputTokens += geminiService.totalInputTokens;
+    session.outputTokens += geminiService.totalOutputTokens;
+    geminiService.resetTokenCount();
+
+    const isLastChunk = wasStopped || rateLimitHit || session.completedPanels >= session.totalPanels;
+    if (isLastChunk) {
+      const elapsedSec = ((Date.now() - session.startTime) / 1000).toFixed(1);
+      console.log(`[BACKGROUND] Translation complete: ${session.completedPanels}/${session.totalPanels} panels | ${elapsedSec}s total | tokens — input: ${session.inputTokens}, output: ${session.outputTokens}, total: ${session.inputTokens + session.outputTokens}`);
+      sessionStatsByTab.delete(tabId);
+    }
+  } else {
+    geminiService.resetTokenCount();
+  }
   if (tabId !== undefined) batchAbortedByTab.delete(tabId);
 
+  const isLastChunk = wasStopped || rateLimitHit ||
+    (tabId !== undefined ? !sessionStatsByTab.has(tabId) : true);
+
   if (wasStopped && !rateLimitHit) {
-    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true });
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, stopped: true, isFinal: true });
   } else if (rateLimitHit) {
-    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again." });
+    sendToTab({ action: "BATCH_COMPLETE", success: false, isRateLimit: true, error: "Gemini API rate limit reached. Please wait and try again.", isFinal: true });
   } else if (!anySuccess) {
-    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again." });
+    sendToTab({ action: "BATCH_COMPLETE", success: false, error: "Could not translate any panels. Check your API key and try again.", isFinal: isLastChunk });
   } else {
-    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed });
+    sendToTab({ action: "BATCH_COMPLETE", success: true, wasRateLimited: anyRateLimited, total: completed, isFinal: isLastChunk });
   }
 }
