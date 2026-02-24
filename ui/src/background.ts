@@ -484,8 +484,10 @@ async function handleProcessImages(request: any, tabId?: number) {
 async function processSinglePanel(
   image: { id: string; dataUrl: string },
   settings: any,
+  isAborted: () => boolean = () => false,
 ): Promise<{ textRegions: TextRegion[]; wasRateLimited: boolean; isRateLimit: boolean; error: string | null }> {
   await initPromise;
+  if (isAborted()) return { textRegions: [], wasRateLimited: false, isRateLimit: false, error: null };
   const imageHash = await TranslationCache.hashImage(image.dataUrl);
   const cached = await cache.get(imageHash, settings.targetLanguage);
   if (cached) {
@@ -495,6 +497,7 @@ async function processSinglePanel(
 
   try {
     const { textRegions, wasRateLimited } = await requestQueue.add(async () => {
+      if (isAborted()) return { textRegions: [], wasRateLimited: false };
       if (!geminiService.isInitialized()) {
         throw new Error("No API key set. Please add your Gemini API key in the extension Settings.");
       }
@@ -512,6 +515,7 @@ async function processSinglePanel(
           }
         }
       }
+      if (isAborted()) return { textRegions: [], wasRateLimited: false };
       const { regions, wasRateLimited } = await geminiService.detectTextRegionsWithOCR(image.dataUrl, settings.targetLanguage);
       return { textRegions: regions, wasRateLimited };
     });
@@ -546,7 +550,7 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
     images.map(async (image: { id: string; dataUrl: string }) => {
       if (isAborted()) return;
 
-      const result = await processSinglePanel(image, settings);
+      const result = await processSinglePanel(image, settings, isAborted);
 
       if (isAborted()) return;
 
