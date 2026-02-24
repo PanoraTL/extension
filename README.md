@@ -12,8 +12,8 @@ Panora is a Chrome extension that translates manga speech bubbles in real time d
 **Speech Bubble and Floating Text Detection**
 A locally running RT-DETR-v2 model detects three classes of text regions: outer bubble shells (`bubble`), inner text areas (`text_bubble`), and free-floating text outside bubbles (`text_free` — SFX, narration boxes, titles). Bounding boxes are accurate even for irregular shapes.
 
-**Per-Region OCR and Translation**
-Each detected region crop is sent to Gemini 2.5 Flash Lite for text extraction and translation. The primary model falls back to Gemini 2.5 Flash automatically when rate limits are hit.
+**Pooled OCR and Translation**
+All detected region crops across panels are pooled and sent to Gemini 2.5 Flash Lite in chunks of 6 for text extraction and translation. The primary model falls back to Gemini 2.5 Flash automatically when rate limits are hit.
 
 **Overlay Rendering**
 Translated text is rendered as positioned overlays directly on top of the manga image. The overlay system accounts for object-fit, partial bubbles at image edges, bubble type (speech, narration, tall, text_free), and font size estimation.
@@ -36,7 +36,7 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
 - **Detection Model**: RT-DETR-v2 r50vd (`ogkalu/comic-text-and-bubble-detector`) — 3 classes: bubble, text_bubble, text_free
-- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm; runs 2 CPU workers by default (MPS cannot be shared across processes; set `--workers 1` and unset `PANORA_DISABLE_MPS` to use GPU on Apple Silicon)
+- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm; single process with a 10-thread pool for concurrent inference (MPS-compatible on Apple Silicon)
 - **Translation / OCR**: Google Gemini 2.5 Flash Lite (primary), Gemini 2.5 Flash (fallback)
 - **Auth**: Better Auth + Convex (shared deployment — no setup needed for contributors)
 - **Build**: Plasmo bundler
@@ -82,7 +82,7 @@ The key is saved in `chrome.storage.local` and persists across sessions. No envi
 | Variable | Default | Description |
 |---|---|---|
 | `LOG_LEVEL` | `INFO` | Python log level. Set to `DEBUG` to enable per-detection-box logs. |
-| `PANORA_DISABLE_MPS` | unset | Set to `1` to force CPU inference (required for multi-worker mode; set automatically by `dev.sh`). |
+| `PANORA_DISABLE_MPS` | unset | Set to `1` to force CPU inference. |
 
 **Auth backend (`ui/auth/`) — maintainers only**
 
@@ -117,7 +117,7 @@ This will:
 1. Create a Python virtual environment and install server dependencies (first run only)
 2. Install Node.js dependencies for the extension (first run only)
 3. Bootstrap `ui/.env.local` from `ui/.env.example` if it doesn't exist
-4. Kill any existing process on port 5001 and start the RT-DETR-v2 detection server with 2 workers
+4. Kill any existing process on port 5001 and start the RT-DETR-v2 detection server
 5. Start the Plasmo extension dev build
 6. Watch for Plasmo rebuilds and re-apply the correct extension icons automatically
 
@@ -131,7 +131,7 @@ Press `Ctrl+C` to stop all services.
 
 **Server**
 
-The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB). The default configuration uses 2 CPU workers for parallelism. To use MPS on Apple Silicon instead, run with a single worker and omit `PANORA_DISABLE_MPS`.
+The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB). It runs as a single process with a 10-thread pool for concurrent inference, and supports MPS on Apple Silicon.
 
 ```bash
 cd server
