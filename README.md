@@ -39,9 +39,9 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
 - **Detection Model**: RT-DETR-v2 r50vd (`ogkalu/comic-text-and-bubble-detector`) — 3 classes: bubble, text_bubble, text_free
-- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm
+- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm; runs 2 workers, uses Apple MPS on macOS and CPU otherwise
 - **Translation / OCR**: Google Gemini 2.5 Flash Lite (primary), Gemini 2.5 Flash (fallback)
-- **Auth**: Better Auth + Convex
+- **Auth**: Better Auth + Convex (shared deployment — no setup needed for contributors)
 - **Build**: Plasmo bundler
 
 ---
@@ -51,7 +51,7 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 ```
 extension/
 ├── ui/            Chrome extension source (Plasmo + React + TypeScript)
-│   └── auth/      Convex auth backend (TypeScript)
+│   └── auth/      Convex auth backend (TypeScript, maintainers only)
 └── server/        Local RT-DETR-v2 detection server (Python + FastAPI)
 ```
 
@@ -72,21 +72,29 @@ The key is saved in `chrome.storage.local` and persists across sessions. No envi
 
 ## Environment Variables
 
-Only one environment variable is needed, for the auth backend:
-
 **Extension (`ui/`)**
 
 | Variable | Description |
 |---|---|
-| `PLASMO_PUBLIC_AUTH_SERVER_URL` | URL of the Better Auth + Convex auth server. Defaults to `http://localhost:3000`. |
+| `PLASMO_PUBLIC_AUTH_SERVER_URL` | URL of the Better Auth + Convex auth server. Pre-filled in `.env.example` with the shared deployment — no changes needed for contributors. |
 
-Copy `ui/.env.example` to `ui/.env.local` and set this if running your own auth server.
+`dev.sh` automatically copies `ui/.env.example` to `ui/.env.local` on first run.
 
 **Server (`server/`)**
 
 | Variable | Default | Description |
 |---|---|---|
 | `LOG_LEVEL` | `INFO` | Python log level. Set to `DEBUG` to enable per-detection-box logs. |
+| `PANORA_DISABLE_MPS` | unset | Set to `1` to force CPU inference (required for multi-worker mode; set automatically by `dev.sh`). |
+
+**Auth backend (`ui/auth/`) — maintainers only**
+
+| Variable | Description |
+|---|---|
+| `CONVEX_URL` | Convex deployment API URL. |
+| `CONVEX_SITE_URL` | Convex site URL used by Better Auth for CORS and redirects. |
+
+Copy `ui/auth/.env.example` to `ui/auth/.env.local` only if you are running your own Convex deployment. Contributors using the shared deployment do not need this file.
 
 ---
 
@@ -102,17 +110,19 @@ Copy `ui/.env.example` to `ui/.env.local` and set this if running your own auth 
 
 ### One-command setup
 
-From the `extension/` directory, a single script starts all services — the RT-DETR-v2 detection server, the Convex backend, and the Plasmo extension:
+From the `extension/` directory:
 
 ```bash
 ./dev.sh
 ```
 
 This will:
-1. Create a Python virtual environment and install dependencies (first run only)
-2. Start the detection server on `http://127.0.0.1:5001`
-3. Start the Plasmo extension dev build and Convex backend
-4. Watch for Plasmo rebuilds and re-apply the correct extension icons automatically
+1. Create a Python virtual environment and install server dependencies (first run only)
+2. Install Node.js dependencies for the extension (first run only)
+3. Bootstrap `ui/.env.local` from `ui/.env.example` if it doesn't exist
+4. Kill any existing process on port 5001 and start the RT-DETR-v2 detection server with 2 workers
+5. Start the Plasmo extension dev build
+6. Watch for Plasmo rebuilds and re-apply the correct extension icons automatically
 
 Then load the extension in Chrome from `ui/build/chrome-mv3-dev`.
 
@@ -122,11 +132,9 @@ Press `Ctrl+C` to stop all services.
 
 ### Manual setup
 
----
+**Server**
 
-### Server
-
-The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB).
+The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB). On macOS with Apple Silicon, inference runs on MPS; on other platforms it uses CPU.
 
 ```bash
 cd server
@@ -143,20 +151,13 @@ curl http://localhost:5001/health
 # {"status":"ok","model_loaded":true}
 ```
 
----
-
-### UI (Chrome Extension)
+**UI (Chrome Extension)**
 
 ```bash
 cd ui
 npm install
 cp .env.example .env.local
-```
-
-Start the development build:
-
-```bash
-npm run dev:all
+npm run dev
 ```
 
 Load the extension in Chrome:
