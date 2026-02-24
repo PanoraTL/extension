@@ -144,7 +144,8 @@ export class GeminiService {
       status === 503 ||
       msg.includes("503") ||
       msg.includes("overloaded") ||
-      msg.includes("unavailable")
+      msg.includes("unavailable") ||
+      msg.includes("failed to fetch")
     ) {
       return true;
     }
