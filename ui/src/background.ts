@@ -163,7 +163,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           totalPanels: request.total,
           completedPanels: 0,
           chunksDone: 0,
-          totalChunks: Math.ceil(request.total / request.images.length),
+          totalChunks: Math.ceil(request.total / 10),
         });
       }
     }

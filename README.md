@@ -39,7 +39,7 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
 - **Detection Model**: RT-DETR-v2 r50vd (`ogkalu/comic-text-and-bubble-detector`) — 3 classes: bubble, text_bubble, text_free
-- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm; runs 2 workers, uses Apple MPS on macOS and CPU otherwise
+- **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm; runs 2 CPU workers by default (MPS cannot be shared across processes; set `--workers 1` and unset `PANORA_DISABLE_MPS` to use GPU on Apple Silicon)
 - **Translation / OCR**: Google Gemini 2.5 Flash Lite (primary), Gemini 2.5 Flash (fallback)
 - **Auth**: Better Auth + Convex (shared deployment — no setup needed for contributors)
 - **Build**: Plasmo bundler
@@ -134,7 +134,7 @@ Press `Ctrl+C` to stop all services.
 
 **Server**
 
-The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB). On macOS with Apple Silicon, inference runs on MPS; on other platforms it uses CPU.
+The local detection server runs an RT-DETR-v2 model that detects speech bubbles and floating text. Model weights are downloaded from HuggingFace on first run (~160 MB). The default configuration uses 2 CPU workers for parallelism. To use MPS on Apple Silicon instead, run with a single worker and omit `PANORA_DISABLE_MPS`.
 
 ```bash
 cd server
