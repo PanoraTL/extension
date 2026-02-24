@@ -23,17 +23,18 @@ PYTHON_SERVER_DIR="$ROOT/server"
 VENV="$PYTHON_SERVER_DIR/venv"
 
 if [ ! -d "$VENV" ]; then
-  echo "[YOLO] Creating virtual environment..."
+  echo "[SERVER] Creating virtual environment..."
   python3 -m venv "$VENV"
 fi
 
 source "$VENV/bin/activate"
 
-echo "[YOLO] Installing Python dependencies..."
+echo "[SERVER] Installing Python dependencies..."
 pip install -q -r "$PYTHON_SERVER_DIR/requirements.txt"
 
-echo "[YOLO] Starting YOLO detection server on http://127.0.0.1:5001"
-uvicorn main:app --host 127.0.0.1 --port 5001 --app-dir "$PYTHON_SERVER_DIR" &
+echo "[SERVER] Starting RT-DETR detection server on http://127.0.0.1:5001"
+# --workers >1 spawns separate processes; MPS cannot be shared across processes so force CPU for multi-worker mode
+PANORA_DISABLE_MPS=1 uvicorn main:app --host 127.0.0.1 --port 5001 --workers 2 --app-dir "$PYTHON_SERVER_DIR" &
 YOLO_PID=$!
 
 deactivate
@@ -67,7 +68,7 @@ ICON_PID=$!
 # ── Wait ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "All services running:"
-echo "  YOLO server  → http://127.0.0.1:5001"
+echo "  RT-DETR server → http://127.0.0.1:5001 (2 workers, CPU)"
 echo "  Extension    → ui/build/chrome-mv3-dev  (load unpacked in Chrome)"
 echo ""
 echo "Press Ctrl+C to stop all services."

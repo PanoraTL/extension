@@ -22,7 +22,7 @@ from transformers import AutoModelForObjectDetection, AutoProcessor
 MODEL_CACHE_DIR = os.path.expanduser("~/.cache/panora/rtdetr_model")
 HF_REPO_ID = "ogkalu/comic-text-and-bubble-detector"
 
-if platform.system() == "Darwin" and torch.backends.mps.is_available():
+if platform.system() == "Darwin" and torch.backends.mps.is_available() and not os.environ.get("PANORA_DISABLE_MPS"):
     DEVICE = torch.device("mps")
 else:
     DEVICE = torch.device("cpu")
