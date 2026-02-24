@@ -457,8 +457,6 @@ async function handleProcessImagesBatch(request: any, tabId?: number) {
       const result = await geminiService.extractAndTranslateFromCrops(allCrops, allTypes, settings.targetLanguage);
       allTranslations = result.translations;
       wasRateLimited = result.wasRateLimited;
-      const translated = allTranslations.filter(t => !!t).length;
-      console.log(`[API] Gemini translation complete: ${translated}/${allTranslations.length} bubbles translated`);
     } catch (error: any) {
       const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
       if (isRateLimit) {
