@@ -226,13 +226,8 @@ async def detect_bubbles(request: DetectRequest):
         if raw_w < 5 or raw_h < 5:
             return None
 
-        cx1 = max(0, x1)
-        cy1 = max(0, y1)
-        cx2 = min(img_w, x2)
-        cy2 = min(img_h, y2)
-
-        visible_w = cx2 - cx1
-        visible_h = cy2 - cy1
+        visible_w = min(img_w, x2) - max(0, x1)
+        visible_h = min(img_h, y2) - max(0, y1)
 
         if visible_w < 5 or visible_h < 5:
             return None
@@ -241,6 +236,12 @@ async def detect_bubbles(request: DetectRequest):
         raw_area = raw_w * raw_h
         if raw_area > 0 and visible_area / raw_area < 0.5:
             return None
+
+        padding = 5
+        cx1 = max(0, x1 - padding)
+        cy1 = max(0, y1 - padding)
+        cx2 = min(img_w, x2 + padding)
+        cy2 = min(img_h, y2 + padding)
 
         pct_x = (x1 / img_w) * 100
         pct_y = (y1 / img_h) * 100
