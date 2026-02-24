@@ -308,16 +308,20 @@ export class GeminiService {
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           if (Array.isArray(parsed)) {
-            return parsed.map((item: any) => ({
+            const results = parsed.map((item: any) => ({
               originalText: item.originalText || "",
               translatedText: item.translatedText || "",
             })) as Array<{ originalText: string; translatedText: string }>;
+            const emptyCount = results.filter(r => !r.translatedText).length;
+            if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops returned empty translation`);
+            return results;
           }
         }
       } catch {
         // fall through to per-item fallback
       }
 
+      console.warn("[API] Failed to parse Gemini response, raw text:", text.substring(0, 300));
       return cropDataUrls.map(() => ({ originalText: "", translatedText: "" }));
     });
     return { translations: value, wasRateLimited };
