@@ -24,6 +24,20 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("[BACKGROUND] Manga Translator extension installed");
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    batchAbortedByTab.set(tabId, true);
+    sessionStatsByTab.delete(tabId);
+    batchAbortedByTab.delete(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  batchAbortedByTab.set(tabId, true);
+  sessionStatsByTab.delete(tabId);
+  batchAbortedByTab.delete(tabId);
+});
+
 class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
@@ -164,6 +178,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabId = sender.tab?.id ?? request.tabId;
     if (tabId !== undefined) batchAbortedByTab.set(tabId, true);
     sendResponse({ success: true });
+    return false;
+  }
+
+  if (request.action === "GET_TRANSLATION_STATUS") {
+    const tabId = request.tabId;
+    const session = tabId !== undefined ? sessionStatsByTab.get(tabId) : undefined;
+    sendResponse({
+      isProcessing: session !== undefined,
+      completedPanels: session?.completedPanels ?? 0,
+      totalPanels: session?.totalPanels ?? 0,
+    });
     return false;
   }
   // session cleanup is handled inside handleProcessImagesBatch when wasStopped is detected

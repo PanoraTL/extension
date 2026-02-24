@@ -97,6 +97,19 @@ function IndexPopup() {
         setDraftApiKey(storedKey);
       }
     });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab?.id) return;
+      chrome.runtime.sendMessage({ action: "GET_TRANSLATION_STATUS", tabId: tab.id }, (resp) => {
+        if (chrome.runtime.lastError || !resp) return;
+        if (resp.isProcessing) {
+          statusRef.current = "processing";
+          setStatus("processing");
+          setProgress({ current: resp.completedPanels, total: resp.totalPanels });
+          setDetectedTotal(resp.totalPanels);
+        }
+      });
+    });
   }, []);
 
   useEffect(() => {
