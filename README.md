@@ -13,7 +13,7 @@ Panora is a Chrome extension that translates manga speech bubbles in real time d
 A locally running RT-DETR-v2 model detects three classes of text regions: outer bubble shells (`bubble`), inner text areas (`text_bubble`), and free-floating text outside bubbles (`text_free` — SFX, narration boxes, titles). Bounding boxes are accurate even for irregular shapes.
 
 **Per-Region OCR and Translation**
-Each detected region crop is sent to Gemini 2.5 Flash for text extraction and translation. The primary model falls back to Gemini 2.5 Flash Lite automatically when rate limits are hit.
+Each detected region crop is sent to Gemini 2.5 Flash Lite for text extraction and translation. The primary model falls back to Gemini 2.5 Flash automatically when rate limits are hit.
 
 **Gemini Fallback Detection**
 If the local detection server is unavailable, the extension falls back to Gemini-based full-image detection and translation, ensuring the extension works without any local server running.
@@ -40,7 +40,7 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 - **Extension Framework**: Plasmo (React 18 + TypeScript, Chrome MV3)
 - **Detection Model**: RT-DETR-v2 r50vd (`ogkalu/comic-text-and-bubble-detector`) — 3 classes: bubble, text_bubble, text_free
 - **Detection Server**: Python 3 + FastAPI + HuggingFace Transformers + timm
-- **Translation / OCR**: Google Gemini 2.5 Flash (primary), Gemini 2.5 Flash Lite (fallback)
+- **Translation / OCR**: Google Gemini 2.5 Flash Lite (primary), Gemini 2.5 Flash (fallback)
 - **Auth**: Better Auth + Convex
 - **Build**: Plasmo bundler
 
