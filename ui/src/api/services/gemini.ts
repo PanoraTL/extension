@@ -342,14 +342,27 @@ export class GeminiService {
     }
 
     const CHUNK_SIZE = 6;
-    const translations: string[] = [];
-    let anyRateLimited = false;
+    const CONCURRENCY = 5;
+    const chunks: Array<{ urls: string[]; types: string[]; index: number }> = [];
     for (let i = 0; i < cropDataUrls.length; i += CHUNK_SIZE) {
-      const urlChunk = cropDataUrls.slice(i, i + CHUNK_SIZE);
-      const typeChunk = bubbleTypes.slice(i, i + CHUNK_SIZE);
-      const chunk = await this.extractAndTranslateChunk(urlChunk, typeChunk, targetLang);
-      translations.push(...chunk.translations);
-      if (chunk.wasRateLimited) anyRateLimited = true;
+      chunks.push({ urls: cropDataUrls.slice(i, i + CHUNK_SIZE), types: bubbleTypes.slice(i, i + CHUNK_SIZE), index: chunks.length });
+    }
+
+    const results: Array<{ translations: string[]; wasRateLimited: boolean }> = new Array(chunks.length);
+    let anyRateLimited = false;
+
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+      const batch = chunks.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async (chunk) => {
+        const result = await this.extractAndTranslateChunk(chunk.urls, chunk.types, targetLang);
+        results[chunk.index] = result;
+      }));
+    }
+
+    const translations: string[] = [];
+    for (const r of results) {
+      translations.push(...r.translations);
+      if (r.wasRateLimited) anyRateLimited = true;
     }
     return { translations, wasRateLimited: anyRateLimited };
   }
