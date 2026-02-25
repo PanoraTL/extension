@@ -117,10 +117,16 @@ export class GeminiService {
     baseDelay: number,
   ): number {
     const msg = (error.message || "").toLowerCase();
-    if (msg.includes("429") || msg.includes("rate limit")) {
+    if (
+      msg.includes("429") ||
+      msg.includes("rate limit") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("resource exhausted") ||
+      msg.includes("quota")
+    ) {
       return Math.min(baseDelay * Math.pow(2, attempt + 1), 60000);
     }
-    return baseDelay * Math.pow(2, attempt);
+    return Math.min(baseDelay * Math.pow(2, attempt), 30000);
   }
 
   private getUserFacingError(error: any): string {
@@ -139,7 +145,7 @@ export class GeminiService {
     if (status === 403 || msg.includes("permission denied")) {
       return "API key lacks permission. Your Gemini API key may be restricted or the project quota is permanently exhausted.";
     }
-    if (status === 503 || msg.includes("503") || msg.includes("overloaded") || (msg.includes("unavailable") && !msg.includes("server"))) {
+    if (status === 503 || msg.includes("503") || msg.includes("overloaded") || msg.includes("service unavailable")) {
       return "Gemini is experiencing high demand. Translation stopped — please try again in a moment.";
     }
     if (status === 429 || msg.includes("rate limit")) {
@@ -179,6 +185,7 @@ export class GeminiService {
         if (!this.usingFallback) {
           console.warn(`[API] Rate limit on ${PRIMARY_MODEL}, retrying with ${FALLBACK_MODEL}`);
           this.switchToFallback();
+          await new Promise((resolve) => setTimeout(resolve, 2000));
           try {
             const value = await fn();
             return { value, wasRateLimited: true };
@@ -199,7 +206,7 @@ export class GeminiService {
         const maxRetries = this.isOverloaded(error) ? 2 : 1;
         let lastError: any = error;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
-          const delay = this.isOverloaded(lastError) ? 1000 : this.getRetryDelay(lastError, attempt, 1000);
+          const delay = this.getRetryDelay(lastError, attempt, 1000);
           console.warn(`[API] Retrying (${attempt + 1}/${maxRetries}) after ${delay}ms — ${lastError.message}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           try {
@@ -281,19 +288,41 @@ export class GeminiService {
 
     const results: Array<{ translations: string[]; wasRateLimited: boolean }> = new Array(chunks.length);
     let anyRateLimited = false;
+    let firstFatalError: any = null;
 
     for (let i = 0; i < chunks.length; i += CONCURRENCY) {
       const batch = chunks.slice(i, i + CONCURRENCY);
-      await Promise.all(batch.map(async (chunk) => {
+      const settled = await Promise.allSettled(batch.map(async (chunk) => {
         const result = await this.extractAndTranslateChunk(chunk.urls, chunk.types, targetLang);
-        results[chunk.index] = result;
+        return { index: chunk.index, result };
       }));
+
+      for (const outcome of settled) {
+        if (outcome.status === "fulfilled") {
+          results[outcome.value.index] = outcome.value.result;
+          if (outcome.value.result.wasRateLimited) anyRateLimited = true;
+        } else {
+          if (!firstFatalError) firstFatalError = outcome.reason;
+        }
+      }
+
+      if (firstFatalError?.isRateLimit) break;
     }
+
+    const hasAnyResult = results.some((r) => r !== undefined);
+    if (firstFatalError && !hasAnyResult) {
+      throw firstFatalError;
+    }
+    if (firstFatalError?.isRateLimit) anyRateLimited = true;
 
     const translations: string[] = [];
     for (const r of results) {
-      translations.push(...r.translations);
-      if (r.wasRateLimited) anyRateLimited = true;
+      if (r) {
+        translations.push(...r.translations);
+        if (r.wasRateLimited) anyRateLimited = true;
+      } else {
+        translations.push("");
+      }
     }
     return { translations, wasRateLimited: anyRateLimited };
   }
