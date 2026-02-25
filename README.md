@@ -3,7 +3,7 @@
   <h1>Panora</h1>
 </div>
 
-Panora is a Chrome extension that translates manga speech bubbles in real time directly in your browser. It detects speech bubbles and floating text on any manga reading website, runs OCR on each region, and overlays the translated text with minimal visual disruption to the original artwork.
+Panora is a Chrome extension that translates manga speech bubbles in real time. You're on a manga website, you click translate, and it overlays translated text directly on top of the bubbles — no leaving the page.
 
 ---
 
