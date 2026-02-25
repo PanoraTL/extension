@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",
+    "@convex-dev/better-auth": "^0.10.11",
     "@google/generative-ai": "^0.21.0",
     "better-auth": "1.4.9",
     "class-variance-authority": "^0.7.1",
@@ -58,6 +59,7 @@
       "scripting",
       "identity",
       "tabs",
+      "cookies",
       "clipboardRead",
       "clipboardWrite"
     ]

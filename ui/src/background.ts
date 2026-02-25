@@ -18,11 +18,38 @@ const sessionStatsByTab = new Map<number, SessionStats>();
 
 chrome.runtime.onInstalled.addListener(() => {});
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+const processedOtts = new Set<string>();
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "loading") {
     batchAbortedByTab.set(tabId, true);
     sessionStatsByTab.delete(tabId);
   }
+
+  if (!tab.url) return;
+  let ott: string | null = null;
+  try {
+    ott = new URL(tab.url).searchParams.get("ott");
+  } catch {}
+  if (!ott || processedOtts.has(ott)) return;
+  processedOtts.add(ott);
+
+  const authURL = process.env.PLASMO_PUBLIC_AUTH_SERVER_URL || "http://localhost:3000";
+  const winId = tab.windowId;
+
+  fetch(`${authURL}/api/auth/cross-domain/one-time-token/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: ott }),
+  })
+    .then(async (res) => {
+      const setCookie = res.headers.get("set-better-auth-cookie");
+      if (!setCookie) return;
+      await chrome.storage.local.set({ better_auth_session_cookie: setCookie });
+      const callbackUrl = chrome.runtime.getURL("tabs/auth-callback.html") + `?winId=${winId}`;
+      chrome.tabs.update(tabId, { url: callbackUrl });
+    })
+    .catch(() => {});
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -174,6 +201,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       completedPanels: session?.completedPanels ?? 0,
       totalPanels: session?.totalPanels ?? 0,
     });
+    return false;
+  }
+
+  if (request.action === "BETTER_AUTH_FETCH") {
+    const { url, method, headers: reqHeaders, body } = request;
+    fetch(url, {
+      method: method || "GET",
+      headers: reqHeaders || {},
+      body: body || undefined,
+    })
+      .then(async (res) => {
+        const resHeaders: Record<string, string> = {};
+        res.headers.forEach((v: string, k: string) => { resHeaders[k] = v; });
+        let data: any = null;
+        try {
+          const text = await res.text();
+          data = text ? JSON.parse(text) : null;
+        } catch {}
+        sendResponse({ ok: res.ok, status: res.status, headers: resHeaders, data });
+      })
+      .catch((err: any) => sendResponse({ ok: false, status: 500, headers: {}, data: null, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "GOOGLE_AUTH_SUCCESS") {
+    const { winId } = request;
+    if (winId) chrome.windows.remove(winId).catch(() => {});
+    chrome.action.openPopup().catch(() => {});
+    chrome.runtime.sendMessage({ action: "AUTH_SESSION_UPDATED" }).catch(() => {});
+    sendResponse({ success: true });
     return false;
   }
 
