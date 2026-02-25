@@ -5,15 +5,6 @@ export type TranslationStatus =
   | "complete"
   | "error";
 
-export interface DetectedImage {
-  id: string;
-  element: HTMLImageElement;
-  src: string;
-  dataUrl: string;
-  bounds: DOMRect;
-  visible: boolean;
-}
-
 export interface TextRegion {
   translatedText: string;
   bounds: BoundingBox;
@@ -37,37 +28,15 @@ export interface BackgroundInfo {
   hasTexture?: boolean;
 }
 
-export interface TranslationResult {
-  imageId: string;
-  textRegions: TextRegion[];
-  cached: boolean;
-  error?: string;
-}
-
 export interface TranslationSettings {
   autoDetectLanguage: boolean;
   showOriginalText: boolean;
   targetLanguage: string;
 }
 
-export interface StartTranslationMessage {
-  action: "START_TRANSLATION";
-  mode: "manual" | "auto";
-  settings: TranslationSettings;
-}
-
-export interface StopTranslationMessage {
-  action: "STOP_TRANSLATION";
-}
-
 export interface FetchImageMessage {
   action: "FETCH_IMAGE";
   url: string;
-}
-
-export interface TranslationResultMessage {
-  action: "TRANSLATION_RESULT";
-  results: TranslationResult[];
 }
 
 export interface ProgressUpdateMessage {

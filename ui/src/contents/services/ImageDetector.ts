@@ -1,5 +1,3 @@
-import type { DetectedImage } from "~/types/translator.types";
-
 export class ImageDetector {
   private static readonly MIN_IMAGE_SIZE = 50;
   private static imageCounter = 0;
@@ -15,45 +13,6 @@ export class ImageDetector {
       const rect = img.getBoundingClientRect();
       return this.isVisible(img) && this.intersects(rect, bounds);
     });
-  }
-
-  static async detectImages(bounds?: DOMRect): Promise<DetectedImage[]> {
-    const imageElements = this.findImages(bounds);
-    const detectedImages: DetectedImage[] = [];
-
-    console.log(
-      `[IMAGE_DETECTOR] Found ${imageElements.length} visible images`,
-    );
-
-    for (const img of imageElements) {
-      try {
-        if (!this.isMangaPanel(img)) {
-          continue;
-        }
-
-        const dataUrl = await this.toDataUrl(img);
-        const detected: DetectedImage = {
-          id: this.generateImageId(img),
-          element: img,
-          src: img.src,
-          dataUrl,
-          bounds: img.getBoundingClientRect(),
-          visible: this.isVisible(img),
-        };
-        detectedImages.push(detected);
-      } catch (error) {
-        console.warn(
-          "[IMAGE_DETECTOR] Failed to convert image:",
-          img.src.substring(0, 80),
-          error,
-        );
-      }
-    }
-
-    console.log(
-      `[IMAGE_DETECTOR] Successfully converted ${detectedImages.length} manga panel images`,
-    );
-    return detectedImages;
   }
 
   static async toDataUrl(img: HTMLImageElement): Promise<string> {
