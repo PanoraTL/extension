@@ -48,71 +48,6 @@ export class GeminiService {
     return this.model !== null;
   }
 
-  async translateText(
-    text: string,
-    targetLang: string = "en",
-  ): Promise<string> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    try {
-      const prompt = `Translate the following text to ${targetLang}. Only provide the translation, no explanations:\n\n${text}`;
-
-      const result = await this.getActiveModel().generateContent(prompt);
-      const response = await result.response;
-      return response.text();
-    } catch (error) {
-      console.error("Gemini translation error:", error);
-      throw error;
-    }
-  }
-
-  async extractAndTranslateFromImage(
-    imageData: string,
-    targetLang: string = "en",
-  ): Promise<{ extractedText: string; translation: string }> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    try {
-      const prompt = `Extract all text from this manga/comic image and translate it to ${targetLang}.
-      Return the response in JSON format with two fields:
-      - "extractedText": the original text found in the image
-      - "translation": the translated text
-      If no text is found, return empty strings.`;
-
-      const imagePart = {
-        inlineData: {
-          data: imageData.split(",")[1],
-          mimeType: "image/png",
-        },
-      };
-
-      const result = await this.getActiveModel().generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text();
-
-      try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        }
-      } catch (e) {
-        console.warn("Failed to parse JSON, returning raw text");
-      }
-
-      return {
-        extractedText: text,
-        translation: text,
-      };
-    } catch (error) {
-      console.error("Gemini image extraction error:", error);
-      throw error;
-    }
-  }
-
   isRateLimit(error: any): boolean {
     const msg = (error.message || "").toLowerCase();
     const status = error.status || error.statusCode || 0;
@@ -367,53 +302,6 @@ export class GeminiService {
     return { translations, wasRateLimited: anyRateLimited };
   }
 
-  async batchTranslate(
-    texts: string[],
-    targetLang: string = "en",
-  ): Promise<string[]> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    if (texts.length === 0) return [];
-
-    try {
-      const prompt = `Translate the following texts to ${targetLang}. Return ONLY a JSON array of translations in the same order, no explanations.
-
-Texts to translate:
-${texts.map((text, i) => `${i + 1}. ${text}`).join("\n")}
-
-Return format: ["translation1", "translation2", ...]`;
-
-      const result = await this.getActiveModel().generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      try {
-        const cleanedText = text
-          .replace(/```json\n?/g, "")
-          .replace(/```\n?/g, "");
-        const jsonMatch = cleanedText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const translations = JSON.parse(jsonMatch[0]);
-          return translations;
-        }
-      } catch (e) {
-        console.warn(
-          "Failed to parse batch translation response, falling back to individual translation",
-        );
-      }
-
-      const translations: string[] = [];
-      for (const text of texts) {
-        translations.push(await this.translateText(text, targetLang));
-      }
-      return translations;
-    } catch (error) {
-      console.error("Gemini batch translation error:", error);
-      throw error;
-    }
-  }
 }
 
 export const geminiService = new GeminiService();
