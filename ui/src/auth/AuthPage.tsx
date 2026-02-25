@@ -1,14 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import logoSrc from "~/assets/orangesquare.png";
 import { authClient } from "./auth-client";
 
 type AuthMode = "login" | "signup";
 
-interface AuthPageProps {
-  onAuthSuccess?: () => void;
-}
-
-export function AuthPage({ onAuthSuccess }: AuthPageProps) {
+export function AuthPage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,7 +47,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           return;
         }
       }
-      onAuthSuccess?.();
+      navigate("/");
     } catch (err: any) {
       setError(err.message || "Authentication failed");
     } finally {
@@ -79,7 +77,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
               clearInterval(poll);
               chrome.windows.onRemoved.removeListener(onWinRemoved);
               if (win.id) chrome.windows.remove(win.id).catch(() => {});
-              onAuthSuccess?.();
+              navigate("/");
             }
           } catch {
           }

@@ -26,6 +26,7 @@
     "plasmo": "^0.89.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router-dom": "^7.13.1",
     "sharp": "^0.34.5",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
