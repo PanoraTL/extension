@@ -1,5 +1,3 @@
-export type TranslationMode = "manual" | "auto" | "idle";
-
 export type TranslationStatus =
   | "idle"
   | "selecting"
@@ -62,30 +60,6 @@ export interface StopTranslationMessage {
   action: "STOP_TRANSLATION";
 }
 
-export interface ToggleOverlaysMessage {
-  action: "TOGGLE_OVERLAYS";
-  show: boolean;
-}
-
-export interface ProcessImagesMessage {
-  action: "PROCESS_IMAGES";
-  images: Array<{
-    id: string;
-    dataUrl: string;
-    bounds: DOMRect;
-  }>;
-  targetLang: string;
-  tabId?: number;
-}
-
-export interface CheckCacheMessage {
-  action: "CHECK_CACHE";
-  images: Array<{
-    id: string;
-    dataUrl: string;
-  }>;
-}
-
 export interface FetchImageMessage {
   action: "FETCH_IMAGE";
   url: string;
@@ -109,68 +83,6 @@ export interface ErrorMessage {
   details?: any;
 }
 
-export interface CacheResultMessage {
-  action: "CACHE_RESULT";
-  cached: Record<string, TextRegion[]>;
-}
-
-export interface ImageFetchResultMessage {
-  action: "IMAGE_FETCH_RESULT";
-  dataUrl: string;
-  error?: string;
-}
-
-export type ContentToPopupMessage = ProgressUpdateMessage | ErrorMessage;
-
-export type PopupMessage =
-  | StartTranslationMessage
-  | StopTranslationMessage
-  | ToggleOverlaysMessage;
-
-export type ContentScriptMessage =
-  | ProcessImagesMessage
-  | CheckCacheMessage
-  | FetchImageMessage;
-
-export type BackgroundMessage =
-  | TranslationResultMessage
-  | ProgressUpdateMessage
-  | ErrorMessage
-  | CacheResultMessage
-  | ImageFetchResultMessage;
-
-export interface TranslatorState {
-  mode: TranslationMode;
-  status: TranslationStatus;
-  selectedArea: DOMRect | null;
-  detectedImages: Map<string, DetectedImage>;
-  translations: Map<string, TextRegion[]>;
-  overlays: Map<string, any>;
-  progress: {
-    current: number;
-    total: number;
-  };
-  error: string | null;
-  settings: TranslationSettings;
-  showOverlays: boolean;
-}
-
-export type TranslatorAction =
-  | {
-      type: "START_SELECTION";
-      mode: "manual" | "auto";
-      settings: TranslationSettings;
-    }
-  | { type: "AREA_SELECTED"; bounds: DOMRect }
-  | { type: "CANCEL_SELECTION" }
-  | { type: "IMAGES_DETECTED"; images: DetectedImage[] }
-  | { type: "TRANSLATION_RECEIVED"; imageId: string; regions: TextRegion[] }
-  | { type: "PROGRESS_UPDATE"; current: number; total: number }
-  | { type: "SET_STATUS"; status: TranslationStatus }
-  | { type: "ERROR"; error: string }
-  | { type: "TOGGLE_OVERLAYS"; show: boolean }
-  | { type: "RESET" };
-
 export interface DetectedBubble {
   bounds: BoundingBox;
   cropDataUrl: string;
@@ -180,16 +92,3 @@ export interface DetectedBubble {
   bubbleType?: "speech" | "narration" | "tall" | "text_free";
 }
 
-export interface CacheEntry {
-  data: TextRegion[];
-  timestamp: number;
-  hits: number;
-  imageUrl?: string;
-}
-
-export interface QueueItem {
-  id: string;
-  execute: () => Promise<any>;
-  priority: number;
-  retries: number;
-}

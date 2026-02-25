@@ -276,10 +276,6 @@ export class ImageDetector {
     return id.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 64);
   }
 
-  static getVisibleImages(): HTMLImageElement[] {
-    return this.findImages();
-  }
-
   static isMangaPanel(img: HTMLImageElement): boolean {
     const rect = img.getBoundingClientRect();
     const aspectRatio = rect.width / rect.height;
@@ -293,7 +289,4 @@ export class ImageDetector {
     );
   }
 
-  static resetCounter(): void {
-    this.imageCounter = 0;
-  }
 }
