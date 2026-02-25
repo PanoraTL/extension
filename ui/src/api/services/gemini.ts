@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 const PRIMARY_MODEL = "gemini-2.5-flash-lite";
 const FALLBACK_MODEL = "gemini-2.5-flash";
@@ -19,8 +19,22 @@ export class GeminiService {
 
   initialize(apiKey: string) {
     this.genAI = new GoogleGenerativeAI(apiKey);
-    this.model = this.genAI.getGenerativeModel({ model: PRIMARY_MODEL });
-    this.fallbackModel = this.genAI.getGenerativeModel({ model: FALLBACK_MODEL });
+    const generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            index: { type: SchemaType.INTEGER },
+            translation: { type: SchemaType.STRING },
+          },
+          required: ["index", "translation"],
+        },
+      },
+    };
+    this.model = this.genAI.getGenerativeModel({ model: PRIMARY_MODEL, generationConfig });
+    this.fallbackModel = this.genAI.getGenerativeModel({ model: FALLBACK_MODEL, generationConfig });
     this.usingFallback = false;
   }
 
@@ -224,9 +238,8 @@ export class GeminiService {
         `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
         `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
         `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
-        `Return ONLY a valid JSON array of exactly ${cropDataUrls.length} strings in the same order as the images. ` +
-        `Each string is the translation in ${targetLang} — it MUST always be in ${targetLang}, never in the source language. Use an empty string if the image has no readable text. ` +
-        `Example: ["Hello, how are you?", "", "I see."]`;
+        `Return an array of exactly ${cropDataUrls.length} objects, each with "index" (0-based, matching the image order) and "translation" (the translated text in ${targetLang}). ` +
+        `The translation MUST always be in ${targetLang}, never in the source language. Use an empty string for "translation" if the image has no readable text.`;
 
       const parts: any[] = [prompt];
       for (const dataUrl of cropDataUrls) {
@@ -236,33 +249,16 @@ export class GeminiService {
       const result = await this.getActiveModel().generateContent(parts);
       this.accumulateTokens(result);
       const response = await result.response;
-      const text = response.text();
-
-      try {
-        const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const firstBracket = cleaned.indexOf("[");
-        const lastBracket = cleaned.lastIndexOf("]");
-        let toParse: string;
-        if (firstBracket !== -1 && lastBracket > firstBracket) {
-          toParse = cleaned.slice(firstBracket, lastBracket + 1);
-        } else if (firstBracket !== -1) {
-          toParse = cleaned.slice(firstBracket) + "]";
-        } else {
-          toParse = `[${cleaned}]`;
+      const parsed = JSON.parse(response.text()) as { index: number; translation: string }[];
+      const ordered = new Array<string>(cropDataUrls.length).fill("");
+      for (const item of parsed) {
+        if (item.index >= 0 && item.index < cropDataUrls.length) {
+          ordered[item.index] = typeof item.translation === "string" ? item.translation : "";
         }
-        const parsed = JSON.parse(toParse);
-        if (Array.isArray(parsed)) {
-          const results = parsed.map((item: any) => (typeof item === "string" ? item : ""));
-          const emptyCount = results.filter((r: string) => !r).length;
-          if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops had no text`);
-          return results;
-        }
-      } catch {
-        // fall through to per-item fallback
       }
-
-      console.warn("[API] Failed to parse Gemini response, raw text:", text.substring(0, 300));
-      return cropDataUrls.map(() => "");
+      const emptyCount = ordered.filter((r) => !r).length;
+      if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${ordered.length} crops had no text`);
+      return ordered;
     });
     return { translations: value, wasRateLimited };
   }
