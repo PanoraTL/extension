@@ -52,7 +52,7 @@ const FEATURES = [
 ];
 
 function IndexPopup() {
-  const { data: session, isPending: authLoading } = authClient.useSession();
+  const { data: session, isPending: authLoading, refetch: refetchSession } = authClient.useSession();
 
   const showStoppedToast = () => {
     toast.dismiss();
@@ -285,7 +285,7 @@ function IndexPopup() {
   }
 
   if (!session) {
-    return <AuthPage />;
+    return <AuthPage onAuthSuccess={() => refetchSession()} />;
   }
 
   return (
