@@ -68,6 +68,7 @@ export function AuthPage() {
           height: 650,
           focused: true,
         });
+        setLoading(false);
       } else if (response.error) {
         setError(response.error.message || "Failed to initiate Google sign-in");
         setLoading(false);

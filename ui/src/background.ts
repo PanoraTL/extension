@@ -18,7 +18,16 @@ const sessionStatsByTab = new Map<number, SessionStats>();
 
 chrome.runtime.onInstalled.addListener(() => {});
 
-const processedOtts = new Set<string>();
+const OTT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const processedOtts = new Map<string, number>(); // ott -> timestamp
+const authPopupWinIds = new Set<number>(); // tracked auth popup window IDs
+
+function evictExpiredOtts() {
+  const now = Date.now();
+  for (const [ott, ts] of processedOtts) {
+    if (now - ts > OTT_TTL_MS) processedOtts.delete(ott);
+  }
+}
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "loading") {
@@ -31,8 +40,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   try {
     ott = new URL(tab.url).searchParams.get("ott");
   } catch {}
+  evictExpiredOtts();
   if (!ott || processedOtts.has(ott)) return;
-  processedOtts.add(ott);
 
   const authURL = process.env.PLASMO_PUBLIC_AUTH_SERVER_URL || "http://localhost:3000";
   const winId = tab.windowId;
@@ -43,8 +52,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     body: JSON.stringify({ token: ott }),
   })
     .then(async (res) => {
+      if (!res.ok) return;
+      processedOtts.set(ott!, Date.now());
       const setCookie = res.headers.get("set-better-auth-cookie");
       if (!setCookie) return;
+      authPopupWinIds.add(winId);
       await chrome.storage.local.set({ better_auth_session_cookie: setCookie });
       const callbackUrl = chrome.runtime.getURL("tabs/auth-callback.html") + `?winId=${winId}`;
       chrome.tabs.update(tabId, { url: callbackUrl });
@@ -205,7 +217,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "BETTER_AUTH_FETCH") {
+    // Only allow trusted extension pages (not content scripts) to use this proxy
+    if (sender.tab) {
+      sendResponse({ ok: false, status: 403, headers: {}, data: null, error: "Forbidden" });
+      return false;
+    }
+    const authURL = process.env.PLASMO_PUBLIC_AUTH_SERVER_URL || "http://localhost:3000";
     const { url, method, headers: reqHeaders, body } = request;
+    let parsedOrigin: string;
+    try {
+      parsedOrigin = new URL(url).origin;
+    } catch {
+      sendResponse({ ok: false, status: 400, headers: {}, data: null, error: "Invalid URL" });
+      return false;
+    }
+    const allowedOrigin = new URL(authURL).origin;
+    if (parsedOrigin !== allowedOrigin) {
+      sendResponse({ ok: false, status: 403, headers: {}, data: null, error: "Origin not allowed" });
+      return false;
+    }
     fetch(url, {
       method: method || "GET",
       headers: reqHeaders || {},
@@ -227,7 +257,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "GOOGLE_AUTH_SUCCESS") {
     const { winId } = request;
-    if (winId) chrome.windows.remove(winId).catch(() => {});
+    if (winId && authPopupWinIds.has(winId)) {
+      authPopupWinIds.delete(winId);
+      chrome.windows.get(winId, (win) => {
+        if (!chrome.runtime.lastError && win?.type === "popup") {
+          chrome.windows.remove(winId).catch(() => {});
+        }
+      });
+    }
     chrome.action.openPopup().catch(() => {});
     chrome.runtime.sendMessage({ action: "AUTH_SESSION_UPDATED" }).catch(() => {});
     sendResponse({ success: true });

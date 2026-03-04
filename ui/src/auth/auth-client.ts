@@ -18,6 +18,10 @@ const backgroundFetch: typeof fetch = async (input, init) => {
         body: init?.body ? String(init.body) : undefined,
       },
       (result) => {
+        if (chrome.runtime.lastError || !result) {
+          resolve(new Response(null, { status: 500 }));
+          return;
+        }
         const responseHeaders = new Headers(result.headers || {});
         resolve(
           new Response(result.data !== null ? JSON.stringify(result.data) : null, {

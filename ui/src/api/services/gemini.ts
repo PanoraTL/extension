@@ -316,12 +316,14 @@ export class GeminiService {
     if (firstFatalError?.isRateLimit) anyRateLimited = true;
 
     const translations: string[] = [];
-    for (const r of results) {
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const chunkSize = chunks[i].urls.length;
       if (r) {
         translations.push(...r.translations);
         if (r.wasRateLimited) anyRateLimited = true;
       } else {
-        translations.push("");
+        translations.push(...Array(chunkSize).fill(""));
       }
     }
     return { translations, wasRateLimited: anyRateLimited };
