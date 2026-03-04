@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 const PRIMARY_MODEL = "gemini-2.5-flash-lite";
 const FALLBACK_MODEL = "gemini-2.5-flash";
@@ -19,8 +19,22 @@ export class GeminiService {
 
   initialize(apiKey: string) {
     this.genAI = new GoogleGenerativeAI(apiKey);
-    this.model = this.genAI.getGenerativeModel({ model: PRIMARY_MODEL });
-    this.fallbackModel = this.genAI.getGenerativeModel({ model: FALLBACK_MODEL });
+    const generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            index: { type: SchemaType.INTEGER },
+            translation: { type: SchemaType.STRING },
+          },
+          required: ["index", "translation"],
+        },
+      },
+    };
+    this.model = this.genAI.getGenerativeModel({ model: PRIMARY_MODEL, generationConfig });
+    this.fallbackModel = this.genAI.getGenerativeModel({ model: FALLBACK_MODEL, generationConfig });
     this.usingFallback = false;
   }
 
@@ -46,71 +60,6 @@ export class GeminiService {
 
   isInitialized(): boolean {
     return this.model !== null;
-  }
-
-  async translateText(
-    text: string,
-    targetLang: string = "en",
-  ): Promise<string> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    try {
-      const prompt = `Translate the following text to ${targetLang}. Only provide the translation, no explanations:\n\n${text}`;
-
-      const result = await this.getActiveModel().generateContent(prompt);
-      const response = await result.response;
-      return response.text();
-    } catch (error) {
-      console.error("Gemini translation error:", error);
-      throw error;
-    }
-  }
-
-  async extractAndTranslateFromImage(
-    imageData: string,
-    targetLang: string = "en",
-  ): Promise<{ extractedText: string; translation: string }> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    try {
-      const prompt = `Extract all text from this manga/comic image and translate it to ${targetLang}.
-      Return the response in JSON format with two fields:
-      - "extractedText": the original text found in the image
-      - "translation": the translated text
-      If no text is found, return empty strings.`;
-
-      const imagePart = {
-        inlineData: {
-          data: imageData.split(",")[1],
-          mimeType: "image/png",
-        },
-      };
-
-      const result = await this.getActiveModel().generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text();
-
-      try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        }
-      } catch (e) {
-        console.warn("Failed to parse JSON, returning raw text");
-      }
-
-      return {
-        extractedText: text,
-        translation: text,
-      };
-    } catch (error) {
-      console.error("Gemini image extraction error:", error);
-      throw error;
-    }
   }
 
   isRateLimit(error: any): boolean {
@@ -168,10 +117,16 @@ export class GeminiService {
     baseDelay: number,
   ): number {
     const msg = (error.message || "").toLowerCase();
-    if (msg.includes("429") || msg.includes("rate limit")) {
+    if (
+      msg.includes("429") ||
+      msg.includes("rate limit") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("resource exhausted") ||
+      msg.includes("quota")
+    ) {
       return Math.min(baseDelay * Math.pow(2, attempt + 1), 60000);
     }
-    return baseDelay * Math.pow(2, attempt);
+    return Math.min(baseDelay * Math.pow(2, attempt), 30000);
   }
 
   private getUserFacingError(error: any): string {
@@ -190,7 +145,7 @@ export class GeminiService {
     if (status === 403 || msg.includes("permission denied")) {
       return "API key lacks permission. Your Gemini API key may be restricted or the project quota is permanently exhausted.";
     }
-    if (status === 503 || msg.includes("503") || msg.includes("overloaded") || (msg.includes("unavailable") && !msg.includes("server"))) {
+    if (status === 503 || msg.includes("503") || msg.includes("overloaded") || msg.includes("service unavailable")) {
       return "Gemini is experiencing high demand. Translation stopped — please try again in a moment.";
     }
     if (status === 429 || msg.includes("rate limit")) {
@@ -230,6 +185,7 @@ export class GeminiService {
         if (!this.usingFallback) {
           console.warn(`[API] Rate limit on ${PRIMARY_MODEL}, retrying with ${FALLBACK_MODEL}`);
           this.switchToFallback();
+          await new Promise((resolve) => setTimeout(resolve, 2000));
           try {
             const value = await fn();
             return { value, wasRateLimited: true };
@@ -250,7 +206,7 @@ export class GeminiService {
         const maxRetries = this.isOverloaded(error) ? 2 : 1;
         let lastError: any = error;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
-          const delay = this.isOverloaded(lastError) ? 1000 : this.getRetryDelay(lastError, attempt, 1000);
+          const delay = this.getRetryDelay(lastError, attempt, 1000);
           console.warn(`[API] Retrying (${attempt + 1}/${maxRetries}) after ${delay}ms — ${lastError.message}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           try {
@@ -289,9 +245,8 @@ export class GeminiService {
         `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
         `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
         `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
-        `Return ONLY a valid JSON array of exactly ${cropDataUrls.length} strings in the same order as the images. ` +
-        `Each string is the translation in ${targetLang} — it MUST always be in ${targetLang}, never in the source language. Use an empty string if the image has no readable text. ` +
-        `Example: ["Hello, how are you?", "", "I see."]`;
+        `Return an array of exactly ${cropDataUrls.length} objects, each with "index" (0-based, matching the image order) and "translation" (the translated text in ${targetLang}). ` +
+        `The translation MUST always be in ${targetLang}, never in the source language. Use an empty string for "translation" if the image has no readable text.`;
 
       const parts: any[] = [prompt];
       for (const dataUrl of cropDataUrls) {
@@ -301,33 +256,16 @@ export class GeminiService {
       const result = await this.getActiveModel().generateContent(parts);
       this.accumulateTokens(result);
       const response = await result.response;
-      const text = response.text();
-
-      try {
-        const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const firstBracket = cleaned.indexOf("[");
-        const lastBracket = cleaned.lastIndexOf("]");
-        let toParse: string;
-        if (firstBracket !== -1 && lastBracket > firstBracket) {
-          toParse = cleaned.slice(firstBracket, lastBracket + 1);
-        } else if (firstBracket !== -1) {
-          toParse = cleaned.slice(firstBracket) + "]";
-        } else {
-          toParse = `[${cleaned}]`;
+      const parsed = JSON.parse(response.text()) as { index: number; translation: string }[];
+      const ordered = new Array<string>(cropDataUrls.length).fill("");
+      for (const item of parsed) {
+        if (item.index >= 0 && item.index < cropDataUrls.length) {
+          ordered[item.index] = typeof item.translation === "string" ? item.translation : "";
         }
-        const parsed = JSON.parse(toParse);
-        if (Array.isArray(parsed)) {
-          const results = parsed.map((item: any) => (typeof item === "string" ? item : ""));
-          const emptyCount = results.filter((r: string) => !r).length;
-          if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${results.length} crops had no text`);
-          return results;
-        }
-      } catch {
-        // fall through to per-item fallback
       }
-
-      console.warn("[API] Failed to parse Gemini response, raw text:", text.substring(0, 300));
-      return cropDataUrls.map(() => "");
+      const emptyCount = ordered.filter((r) => !r).length;
+      if (emptyCount > 0) console.warn(`[API] ${emptyCount}/${ordered.length} crops had no text`);
+      return ordered;
     });
     return { translations: value, wasRateLimited };
   }
@@ -350,70 +288,47 @@ export class GeminiService {
 
     const results: Array<{ translations: string[]; wasRateLimited: boolean }> = new Array(chunks.length);
     let anyRateLimited = false;
+    let firstFatalError: any = null;
 
     for (let i = 0; i < chunks.length; i += CONCURRENCY) {
       const batch = chunks.slice(i, i + CONCURRENCY);
-      await Promise.all(batch.map(async (chunk) => {
+      const settled = await Promise.allSettled(batch.map(async (chunk) => {
         const result = await this.extractAndTranslateChunk(chunk.urls, chunk.types, targetLang);
-        results[chunk.index] = result;
+        return { index: chunk.index, result };
       }));
+
+      for (const outcome of settled) {
+        if (outcome.status === "fulfilled") {
+          results[outcome.value.index] = outcome.value.result;
+          if (outcome.value.result.wasRateLimited) anyRateLimited = true;
+        } else {
+          if (!firstFatalError) firstFatalError = outcome.reason;
+        }
+      }
+
+      if (firstFatalError?.isRateLimit) break;
     }
 
+    const hasAnyResult = results.some((r) => r !== undefined);
+    if (firstFatalError && !hasAnyResult) {
+      throw firstFatalError;
+    }
+    if (firstFatalError?.isRateLimit) anyRateLimited = true;
+
     const translations: string[] = [];
-    for (const r of results) {
-      translations.push(...r.translations);
-      if (r.wasRateLimited) anyRateLimited = true;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const chunkSize = chunks[i].urls.length;
+      if (r) {
+        translations.push(...r.translations);
+        if (r.wasRateLimited) anyRateLimited = true;
+      } else {
+        translations.push(...Array(chunkSize).fill(""));
+      }
     }
     return { translations, wasRateLimited: anyRateLimited };
   }
 
-  async batchTranslate(
-    texts: string[],
-    targetLang: string = "en",
-  ): Promise<string[]> {
-    if (!this.model) {
-      throw new Error("Gemini API not initialized. Please provide an API key.");
-    }
-
-    if (texts.length === 0) return [];
-
-    try {
-      const prompt = `Translate the following texts to ${targetLang}. Return ONLY a JSON array of translations in the same order, no explanations.
-
-Texts to translate:
-${texts.map((text, i) => `${i + 1}. ${text}`).join("\n")}
-
-Return format: ["translation1", "translation2", ...]`;
-
-      const result = await this.getActiveModel().generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      try {
-        const cleanedText = text
-          .replace(/```json\n?/g, "")
-          .replace(/```\n?/g, "");
-        const jsonMatch = cleanedText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const translations = JSON.parse(jsonMatch[0]);
-          return translations;
-        }
-      } catch (e) {
-        console.warn(
-          "Failed to parse batch translation response, falling back to individual translation",
-        );
-      }
-
-      const translations: string[] = [];
-      for (const text of texts) {
-        translations.push(await this.translateText(text, targetLang));
-      }
-      return translations;
-    } catch (error) {
-      console.error("Gemini batch translation error:", error);
-      throw error;
-    }
-  }
 }
 
 export const geminiService = new GeminiService();

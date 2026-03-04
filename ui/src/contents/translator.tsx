@@ -238,7 +238,6 @@ const MangaTranslator = () => {
         sendResponse({ success: true });
         return false;
       }
-      return false;
     };
     chrome.runtime.onMessage.addListener(handleMessage);
     return () => chrome.runtime.onMessage.removeListener(handleMessage);

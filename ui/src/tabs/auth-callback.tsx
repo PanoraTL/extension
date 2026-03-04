@@ -1,5 +1,5 @@
+import { getSetCookie } from "@convex-dev/better-auth/client/plugins";
 import { useEffect, useState } from "react";
-import { authClient } from "~/auth/auth-client";
 
 type Status = "pending" | "success" | "error";
 
@@ -7,15 +7,31 @@ function AuthCallback() {
   const [status, setStatus] = useState<Status>("pending");
 
   useEffect(() => {
-    authClient.getSession().then((session) => {
-      if (session?.data) {
+    const params = new URLSearchParams(window.location.search);
+    const winId = params.get("winId") ? Number(params.get("winId")) : undefined;
+
+    (async () => {
+      try {
+        const result = await chrome.storage.local.get("better_auth_session_cookie");
+        const setCookie = result["better_auth_session_cookie"] as string | undefined;
+        if (!setCookie) {
+          setStatus("error");
+          return;
+        }
+        await chrome.storage.local.remove("better_auth_session_cookie");
+        const prev = localStorage.getItem("better-auth_cookie") ?? undefined;
+        localStorage.setItem("better-auth_cookie", getSetCookie(setCookie, prev));
         setStatus("success");
-      } else {
+        chrome.runtime.sendMessage({ action: "GOOGLE_AUTH_SUCCESS", winId });
+        setTimeout(() => {
+          chrome.tabs.getCurrent((tab) => {
+            if (tab?.id) chrome.tabs.remove(tab.id);
+          });
+        }, 1000);
+      } catch {
         setStatus("error");
       }
-    }).catch(() => {
-      setStatus("error");
-    });
+    })();
   }, []);
 
   return (
@@ -63,25 +79,7 @@ function AuthCallback() {
         {status === "success" && (
           <>
             <h2 style={{ margin: "0 0 8px", color: "#C15F3C", fontSize: "18px" }}>You're signed in!</h2>
-            <p style={{ color: "#888", fontSize: "14px", margin: "0 0 20px" }}>
-              Click the Panora extension icon in your toolbar to continue.
-            </p>
-            <button
-              onClick={() => window.close()}
-              style={{
-                padding: "10px 24px",
-                background: "#C15F3C",
-                color: "#fff",
-                border: "none",
-                borderRadius: "8px",
-                fontSize: "14px",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              Close tab
-            </button>
+            <p style={{ color: "#888", fontSize: "14px", margin: 0 }}>Opening Panora...</p>
           </>
         )}
         {status === "error" && (

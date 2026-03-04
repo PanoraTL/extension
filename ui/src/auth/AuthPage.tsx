@@ -1,14 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import logoSrc from "~/assets/orangesquare.png";
 import { authClient } from "./auth-client";
 
 type AuthMode = "login" | "signup";
 
-interface AuthPageProps {
-  onAuthSuccess?: () => void;
-}
-
-export function AuthPage({ onAuthSuccess }: AuthPageProps) {
+export function AuthPage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,7 +47,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           return;
         }
       }
-      onAuthSuccess?.();
+      navigate("/");
     } catch (err: any) {
       setError(err.message || "Authentication failed");
     } finally {
@@ -62,37 +60,15 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     setLoading(true);
     try {
       const response = await authClient.signIn.social({ provider: "google" });
-
       if (response.data?.url) {
-        const win = await chrome.windows.create({
+        chrome.windows.create({
           url: response.data.url,
           type: "popup",
           width: 500,
           height: 650,
           focused: true,
         });
-
-        const poll = setInterval(async () => {
-          try {
-            const session = await authClient.getSession();
-            if (session?.data) {
-              clearInterval(poll);
-              chrome.windows.onRemoved.removeListener(onWinRemoved);
-              if (win.id) chrome.windows.remove(win.id).catch(() => {});
-              onAuthSuccess?.();
-            }
-          } catch {
-          }
-        }, 1500);
-
-        const onWinRemoved = (windowId: number) => {
-          if (windowId === win.id) {
-            clearInterval(poll);
-            chrome.windows.onRemoved.removeListener(onWinRemoved);
-            setLoading(false);
-          }
-        };
-        chrome.windows.onRemoved.addListener(onWinRemoved);
+        setLoading(false);
       } else if (response.error) {
         setError(response.error.message || "Failed to initiate Google sign-in");
         setLoading(false);
