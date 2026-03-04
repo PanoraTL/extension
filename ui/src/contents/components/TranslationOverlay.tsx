@@ -1,10 +1,39 @@
 import React, { useEffect, useState } from "react";
 import type { TextRegion } from "~/types/translator.types";
 
+// Languages that read right-to-left
+const RTL_LANGUAGES = new Set(["ar", "he", "fa", "ur"]);
+
+/**
+ * Compute a readable text color (black or white) that contrasts with the
+ * given hex background color using the WCAG relative-luminance formula.
+ */
+function getContrastColor(hex: string): string {
+  try {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? "#111111" : "#FFFFFF";
+  } catch {
+    return "#111111";
+  }
+}
+
+/**
+ * Return a valid hex background color from the region's BackgroundInfo,
+ * falling back to white when the value is missing or malformed.
+ */
+function getBubbleBackground(color?: string): string {
+  if (color && /^#[0-9A-Fa-f]{6}$/.test(color)) return color;
+  return "#FFFFFF";
+}
+
 interface TranslationOverlayProps {
   imageElement: HTMLImageElement;
   textRegions: TextRegion[];
   container: HTMLElement;
+  targetLanguage?: string;
   onClose?: () => void;
 }
 
@@ -66,9 +95,11 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
   imageElement,
   textRegions,
   container,
+  targetLanguage,
   onClose,
 }) => {
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+  const isRtl = RTL_LANGUAGES.has(targetLanguage ?? "");
 
   useEffect(() => {
     let lastW = 0;
@@ -159,6 +190,11 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
 
         const isEmpty = !region.translatedText?.trim();
 
+        // Use the server-detected bubble background color for a natural look;
+        // derive a contrasting text color from it automatically.
+        const bgColor = getBubbleBackground(region.background?.color);
+        const textColor = getContrastColor(bgColor);
+
         return (
           <div
             key={index}
@@ -171,7 +207,7 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
-              backgroundColor: isEmpty ? "transparent" : "#FFFFFF",
+              backgroundColor: isEmpty ? "transparent" : bgColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -183,9 +219,10 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
                 fontFamily,
                 fontSize: `${fontSize}px`,
                 fontWeight,
-                color: "#111111",
+                color: textColor,
                 textShadow: "none",
-                textAlign: "center",
+                textAlign: isRtl ? "right" : "center",
+                direction: isRtl ? "rtl" : "ltr",
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
                 lineHeight: "1.25",
