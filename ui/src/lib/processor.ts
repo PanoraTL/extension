@@ -1,7 +1,3 @@
-/**
- * processor.ts — Single-panel and batch translation processing.
- */
-
 import { geminiService } from "~/api/services";
 import type { DetectedBubble, TextRegion } from "~/types/translator.types";
 import { cache, requestQueue, TranslationCache } from "./cache";
@@ -180,7 +176,6 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
   const isAborted = () =>
     tabId !== undefined && batchAbortedByTab.get(tabId) === true;
 
-  // Phase 1: detect bubbles for all panels (parallel, with cache checks)
   const detectionResults = await Promise.all(
     images.map(async (image: { id: string; dataUrl: string }) => {
       if (isAborted())
@@ -231,7 +226,6 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
     return;
   }
 
-  // Phase 2: pool all crops across panels and call Gemini once
   const panelCropOffsets: {
     image: { id: string; dataUrl: string };
     start: number;
@@ -283,7 +277,6 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
     }
   }
 
-  // Phase 3: distribute translations back to each panel and stream results
   const offsetMap = new Map(panelCropOffsets.map((p) => [p.image.id, p]));
   const bubblesMap = new Map(detectionResults.map((d) => [d.image.id, d.bubbles ?? []]));
 
@@ -334,7 +327,6 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
 
   const wasStopped = isAborted();
 
-  // Update session stats and log on final chunk
   if (tabId !== undefined && sessionStatsByTab.has(tabId)) {
     const session = sessionStatsByTab.get(tabId)!;
     session.completedPanels += completed;

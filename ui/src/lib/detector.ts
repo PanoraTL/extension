@@ -1,7 +1,3 @@
-/**
- * detector.ts — Local detection server client and text-region builder.
- */
-
 import type { DetectedBubble, TextRegion } from "~/types/translator.types";
 
 const MODEL_SERVER_URL = "http://localhost:5001";

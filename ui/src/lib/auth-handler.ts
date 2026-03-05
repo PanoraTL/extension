@@ -1,11 +1,6 @@
-/**
- * auth-handler.ts — One-time token verification, BETTER_AUTH_FETCH proxy,
- * and GOOGLE_AUTH_SUCCESS handler.
- */
-
-const OTT_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const processedOtts = new Map<string, number>(); // ott → verified timestamp
-export const authPopupWinIds = new Set<number>(); // tracked auth popup window IDs
+const OTT_TTL_MS = 5 * 60 * 1000;
+const processedOtts = new Map<string, number>();
+export const authPopupWinIds = new Set<number>();
 
 function evictExpiredOtts() {
   const now = Date.now();
@@ -14,10 +9,6 @@ function evictExpiredOtts() {
   }
 }
 
-/**
- * Call this from chrome.tabs.onUpdated to handle OAuth one-time tokens.
- * Returns true if the tab URL contained an OTT that was processed.
- */
 export function handleOttFromTab(
   tabId: number,
   tabUrl: string,
@@ -53,18 +44,11 @@ export function handleOttFromTab(
     .catch(() => {});
 }
 
-/**
- * Handle a BETTER_AUTH_FETCH message: proxy the auth-server request from the
- * popup context (which can't reach the auth server directly in MV3).
- *
- * Returns `true` (async) when the request is accepted, `false` otherwise.
- */
 export function handleBetterAuthFetch(
   request: any,
   sender: chrome.runtime.MessageSender,
   sendResponse: (r: any) => void,
 ): boolean {
-  // Reject messages originating from content scripts (sender.tab is set)
   if (sender.tab) {
     sendResponse({ ok: false, status: 403, headers: {}, data: null, error: "Forbidden" });
     return false;
@@ -107,13 +91,9 @@ export function handleBetterAuthFetch(
       sendResponse({ ok: false, status: 500, headers: {}, data: null, error: err.message })
     );
 
-  return true; // keeps the message channel open for the async response
+  return true;
 }
 
-/**
- * Handle a GOOGLE_AUTH_SUCCESS message: close the auth popup (only if it is a
- * known tracked window of type "popup") and reopen the extension popup.
- */
 export function handleGoogleAuthSuccess(
   request: any,
   sendResponse: (r: any) => void,

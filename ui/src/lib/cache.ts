@@ -1,7 +1,3 @@
-/**
- * cache.ts — Translation cache (chrome.storage.local) and request queue.
- */
-
 export class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
   private processing = false;
@@ -43,7 +39,7 @@ export class RequestQueue {
 
 export class TranslationCache {
   private readonly CACHE_KEY_PREFIX = "manga_translation_";
-  private readonly TTL_MS = 60 * 60 * 1000; // 1 hour
+  private readonly TTL_MS = 60 * 60 * 1000;
 
   async get(imageHash: string, targetLang: string): Promise<any | null> {
     const key = `${this.CACHE_KEY_PREFIX}${imageHash}_${targetLang}`;

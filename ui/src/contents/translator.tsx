@@ -194,9 +194,6 @@ const MangaTranslator = () => {
   useEffect(() => { translationHandlerRef.current = handleAutoTranslation; }, [handleAutoTranslation]);
   useEffect(() => { processingRef.current = false; }, []);
 
-  // MutationObserver: catch lazy-loaded images that appear after translation starts.
-  // When a new <img> element is added to the DOM while a translation is in progress,
-  // we check if it's an untranslated manga panel and queue it automatically.
   useEffect(() => {
     const tryTranslateImage = async (img: HTMLImageElement) => {
       if (!processingRef.current) return;
@@ -217,12 +214,10 @@ const MangaTranslator = () => {
           total: 1,
         });
       } catch {
-        // Silently skip images that fail to load
       }
     };
 
     const handleNewImage = (img: HTMLImageElement) => {
-      // If the image is already loaded, try immediately; otherwise wait for load
       if (img.complete && img.naturalWidth > 0) {
         tryTranslateImage(img);
       } else {
@@ -274,7 +269,6 @@ const MangaTranslator = () => {
         if (message.isFinal) {
           processingRef.current = false;
           if (message.stopped) {
-            // user stopped intentionally — go idle without any toast
           } else if (!message.success) {
             notifyPopup({ action: "ERROR", error: message.error, isRateLimit: message.isRateLimit });
           } else if (message.wasRateLimited) {
