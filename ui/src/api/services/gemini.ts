@@ -231,26 +231,56 @@ export class GeminiService {
     }
   }
 
+  private async resizeCrop(dataUrl: string, maxDim = 512): Promise<{ data: string; mimeType: string }> {
+    try {
+      const [header, b64data] = dataUrl.split(",");
+      const mimeType = header.match(/data:([^;]+)/)?.[1] ?? "image/png";
+      const bytes = Uint8Array.from(atob(b64data), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: mimeType });
+      const bitmap = await createImageBitmap(blob);
+      const { width, height } = bitmap;
+      const maxSide = Math.max(width, height);
+      if (maxSide <= maxDim) {
+        bitmap.close();
+        return { data: b64data, mimeType };
+      }
+      const scale = maxDim / maxSide;
+      const canvas = new OffscreenCanvas(Math.round(width * scale), Math.round(height * scale));
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const resizedBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
+      const buf = await resizedBlob.arrayBuffer();
+      const arr = new Uint8Array(buf);
+      let binary = "";
+      for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+      return { data: btoa(binary), mimeType: "image/jpeg" };
+    } catch {
+      const [header, b64data] = dataUrl.split(",");
+      return { data: b64data, mimeType: header.match(/data:([^;]+)/)?.[1] ?? "image/png" };
+    }
+  }
+
   private async extractAndTranslateChunk(
     cropDataUrls: string[],
     bubbleTypes: string[],
     targetLang: string,
   ): Promise<{ translations: string[]; wasRateLimited: boolean }> {
+    const resized = await Promise.all(cropDataUrls.map((url) => this.resizeCrop(url)));
+
     const { value, wasRateLimited } = await this.retryWithBackoff(async () => {
       const imageDescriptions = cropDataUrls
-        .map((_, i) => `[Image ${i + 1} - ${bubbleTypes[i] ?? "speech"}]`)
-        .join(", ");
+        .map((_, i) => `[${i + 1}:${bubbleTypes[i] ?? "speech"}]`)
+        .join(" ");
 
       const prompt =
-        `You are given ${cropDataUrls.length} text region image(s) from a manga page: ${imageDescriptions}. ` +
-        `Images labelled "text_free" are sound effects or free-floating text outside speech bubbles — translate them naturally as onomatopoeia or effects. ` +
-        `Images labelled "speech", "narration", or "tall" are dialogue/thought bubbles — extract and translate the dialogue text. ` +
-        `Return an array of exactly ${cropDataUrls.length} objects, each with "index" (0-based, matching the image order) and "translation" (the translated text in ${targetLang}). ` +
-        `The translation MUST always be in ${targetLang}, never in the source language. Use an empty string for "translation" if the image has no readable text.`;
+        `Translate ${cropDataUrls.length} manga bubble image(s) ${imageDescriptions}. ` +
+        `"speech"/"narration"/"tall"=dialogue; "text_free"=sound effect. ` +
+        `Return exactly ${cropDataUrls.length} JSON objects {index,translation} in ${targetLang}. Empty string if no text.`;
 
       const parts: any[] = [prompt];
-      for (const dataUrl of cropDataUrls) {
-        parts.push({ inlineData: { data: dataUrl.split(",")[1], mimeType: "image/png" } });
+      for (const { data, mimeType } of resized) {
+        parts.push({ inlineData: { data, mimeType } });
       }
 
       const result = await this.getActiveModel().generateContent(parts);

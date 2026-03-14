@@ -15,11 +15,9 @@ ui/.env.production.local
 ui/.env.development.local
 ui/CLAUDE.md
 
-# ── auth (Convex) ─────────────────────────────────────────────────────────────
-ui/auth/node_modules/
-ui/auth/convex/_generated/
-ui/auth/function_spec_*.json
-ui/auth/.env.local
+# ── convex ────────────────────────────────────────────────────────────────────
+ui/convex/_generated/
+ui/function_spec_*.json
 
 # ── server (Python / FastAPI) ─────────────────────────────────────────────────
 server/venv/

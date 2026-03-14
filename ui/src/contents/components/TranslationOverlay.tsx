@@ -1,74 +1,44 @@
 import React, { useEffect, useState } from "react";
 import type { TextRegion } from "~/types/translator.types";
+import { getImageContentRect, positionContainerOverImage } from "~/lib/image-utils";
+
+const RTL_LANGUAGES = new Set(["ar", "he", "fa", "ur"]);
+
+function getContrastColor(hex: string): string {
+  try {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? "#111111" : "#FFFFFF";
+  } catch {
+    return "#111111";
+  }
+}
+
+function getBubbleBackground(color?: string): string {
+  if (color && /^#[0-9A-Fa-f]{6}$/.test(color)) return color;
+  return "#FFFFFF";
+}
 
 interface TranslationOverlayProps {
   imageElement: HTMLImageElement;
   textRegions: TextRegion[];
   container: HTMLElement;
+  targetLanguage?: string;
   onClose?: () => void;
 }
 
-function getImageContentRect(img: HTMLImageElement): {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-} {
-  const elRect = img.getBoundingClientRect();
-  const elW = elRect.width;
-  const elH = elRect.height;
-  const natW = img.naturalWidth || elW;
-  const natH = img.naturalHeight || elH;
-  const objectFit = window.getComputedStyle(img).objectFit;
-
-  if (objectFit === "contain") {
-    const scale = Math.min(elW / natW, elH / natH);
-    const contentW = natW * scale;
-    const contentH = natH * scale;
-    return {
-      left: elRect.left + (elW - contentW) / 2,
-      top: elRect.top + (elH - contentH) / 2,
-      width: contentW,
-      height: contentH,
-    };
-  }
-
-  if (objectFit === "cover") {
-    const scale = Math.max(elW / natW, elH / natH);
-    const contentW = natW * scale;
-    const contentH = natH * scale;
-    return {
-      left: elRect.left + (elW - contentW) / 2,
-      top: elRect.top + (elH - contentH) / 2,
-      width: contentW,
-      height: contentH,
-    };
-  }
-
-  return { left: elRect.left, top: elRect.top, width: elW, height: elH };
-}
-
-function positionContainerOverImage(
-  container: HTMLElement,
-  img: HTMLImageElement,
-) {
-  const content = getImageContentRect(img);
-  const parentRect = (
-    container.parentElement as HTMLElement
-  ).getBoundingClientRect();
-  container.style.left = `${content.left - parentRect.left}px`;
-  container.style.top = `${content.top - parentRect.top}px`;
-  container.style.width = `${content.width}px`;
-  container.style.height = `${content.height}px`;
-}
 
 export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
   imageElement,
   textRegions,
   container,
+  targetLanguage,
   onClose,
 }) => {
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+  const isRtl = RTL_LANGUAGES.has(targetLanguage ?? "");
 
   useEffect(() => {
     let lastW = 0;
@@ -159,6 +129,9 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
 
         const isEmpty = !region.translatedText?.trim();
 
+        const bgColor = getBubbleBackground(region.background?.color);
+        const textColor = getContrastColor(bgColor);
+
         return (
           <div
             key={index}
@@ -171,7 +144,7 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
               pointerEvents: "none",
               overflow: "hidden",
               borderRadius,
-              backgroundColor: isEmpty ? "transparent" : "#FFFFFF",
+              backgroundColor: isEmpty ? "transparent" : bgColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -183,9 +156,10 @@ export const TranslationOverlay: React.FC<TranslationOverlayProps> = ({
                 fontFamily,
                 fontSize: `${fontSize}px`,
                 fontWeight,
-                color: "#111111",
+                color: textColor,
                 textShadow: "none",
-                textAlign: "center",
+                textAlign: isRtl ? "right" : "center",
+                direction: isRtl ? "rtl" : "ltr",
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
                 lineHeight: "1.25",

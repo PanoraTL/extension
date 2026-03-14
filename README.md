@@ -43,6 +43,28 @@ Supports translation into 12 languages: English, Japanese, Korean, Chinese, Span
 
 ---
 
+## Architecture
+
+### End-to-end flow
+
+<img src="assets/panora-flow-overview.svg" alt="Panora execution flow — overview" width="100%" />
+
+When the user clicks **Translate**, a `START_TRANSLATION` message travels from the popup (`MainPage.tsx`) to the content script (`translator.tsx`). The content script runs `ImageDetector` to find manga panels on the page, encodes each one to a base64 data URL via canvas or a background fetch, then sends `PROCESS_IMAGES_BATCH` messages — chunks of 10 panels — to the background script.
+
+The background script checks `TranslationCache` (SHA-256 keyed, 1 hr TTL) for each panel. Cache misses are queued through `RequestQueue` (5 concurrent slots) and dispatched as `detectBubbles()` POST requests to the local detection server, followed by `GeminiService.extractAndTranslate` for OCR and translation. Results stream back as `PANEL_RESULT` messages; the content script renders a `TranslationOverlay` per panel as each one completes. A final `BATCH_COMPLETE` message is sent to the popup when all chunks are done.
+
+### Detection and translation internals
+
+<img src="assets/panora-flow-detail.svg" alt="Panora execution flow — detail" width="100%" />
+
+**Detection server (`main.py`, localhost:5001):** Incoming base64 images are decoded to PIL and passed through RT-DETR-v2 running on a 10-thread `ThreadPoolExecutor`. The model classifies each detected region as `bubble`, `text_bubble`, or `text_free`, then applies IoU matching, crop encoding, and background sampling before returning a `BubbleResult[]` array.
+
+**Gemini (`gemini.ts`):** Crops from all bubbles in a panel are pooled and sent to Gemini 2.5 Flash Lite in chunks of 6 for OCR and translation in a single prompt. If the primary model returns a 429, the call is automatically retried against Gemini 2.5 Flash. The response is a JSON array of `{index, translation}` objects which are reordered and returned.
+
+**Assembly:** `buildTextRegions()` merges the bubble bounding boxes with their translations into positioned text regions. The result is written to `chrome.storage.local` and dispatched as `PANEL_RESULT` to the content script, which renders the overlay.
+
+---
+
 ## Repository Structure
 
 ```
