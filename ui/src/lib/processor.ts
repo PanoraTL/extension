@@ -60,6 +60,7 @@ export async function handleProcessImages(request: any, tabId?: number) {
     try {
       const imageHash = await TranslationCache.hashImage(image.dataUrl);
       let textRegions = await cache.get(imageHash, settings.targetLanguage);
+      let fromCache = textRegions !== null;
 
       if (!textRegions) {
         textRegions = await requestQueue.add(async () => {
@@ -86,7 +87,7 @@ export async function handleProcessImages(request: any, tabId?: number) {
       results.push({
         imageId: image.id,
         textRegions: (textRegions as any)?.textRegions || textRegions || [],
-        cached: false,
+        cached: fromCache,
         error: null,
         wasRateLimited: (textRegions as any)?.wasRateLimited ?? false,
       });
@@ -258,6 +259,9 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
         settings.targetLanguage,
       );
       allTranslations = result.translations;
+      if (allTranslations.length < allCrops.length) {
+        while (allTranslations.length < allCrops.length) allTranslations.push("");
+      }
       wasRateLimited = result.wasRateLimited;
     } catch (error: any) {
       const isRateLimit = !!(error.isRateLimit || geminiService.isRateLimit(error));
@@ -352,7 +356,7 @@ export async function handleProcessImagesBatch(request: any, tabId?: number) {
     geminiService.resetTokenCount();
   }
 
-  if (tabId !== undefined) batchAbortedByTab.delete(tabId);
+  if (tabId !== undefined && !wasStopped && !rateLimitHit) batchAbortedByTab.delete(tabId);
 
   const isLastChunk =
     wasStopped || rateLimitHit || (tabId !== undefined ? !sessionStatsByTab.has(tabId) : true);

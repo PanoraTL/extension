@@ -82,7 +82,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     }
     sendResponse({ success: true });
-    initPromise.then(() => handleProcessImagesBatch(request, tabId));
+    const keepaliveInterval = setInterval(() => {
+      chrome.storage.local.get(null, () => {});
+    }, 20000);
+    initPromise.then(() => handleProcessImagesBatch(request, tabId)).finally(() => {
+      clearInterval(keepaliveInterval);
+    });
     return false;
   }
 

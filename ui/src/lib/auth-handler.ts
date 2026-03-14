@@ -32,11 +32,11 @@ export function handleOttFromTab(
   })
     .then(async (res) => {
       if (!res.ok) return;
-      processedOtts.set(ott!, Date.now());
       const setCookie = res.headers.get("set-better-auth-cookie");
       if (!setCookie) return;
       authPopupWinIds.add(winId);
       await chrome.storage.local.set({ better_auth_session_cookie: setCookie });
+      processedOtts.set(ott!, Date.now());
       const callbackUrl =
         chrome.runtime.getURL("tabs/auth-callback.html") + `?winId=${winId}`;
       chrome.tabs.update(tabId, { url: callbackUrl });

@@ -1,6 +1,5 @@
 export class RequestQueue {
   private queue: Array<() => Promise<any>> = [];
-  private processing = false;
   private concurrent = 5;
   private active = 0;
 
@@ -18,10 +17,7 @@ export class RequestQueue {
     });
   }
 
-  private async process() {
-    if (this.processing) return;
-    this.processing = true;
-
+  private process() {
     while (this.queue.length > 0 && this.active < this.concurrent) {
       const task = this.queue.shift();
       if (task) {
@@ -32,8 +28,6 @@ export class RequestQueue {
         });
       }
     }
-
-    this.processing = false;
   }
 }
 
@@ -77,7 +71,7 @@ export class TranslationCache {
 
   static async hashImage(dataUrl: string): Promise<string> {
     const encoder = new TextEncoder();
-    const data = encoder.encode(dataUrl);
+    const data = encoder.encode(dataUrl.slice(0, 65536));
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
